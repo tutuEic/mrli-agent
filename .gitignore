@@ -1,0 +1,12 @@
+# Binary
+mrli-agent
+mrli-agent.exe
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db

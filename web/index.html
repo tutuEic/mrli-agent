@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MRLI-Agent</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ==================== Sidebar ==================== -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">M</div>
+        <div>
+          <div class="logo-text">MRLI-Agent</div>
+          <div class="logo-sub">Agent Console</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-nav">
+      <p class="nav-label">Navigation</p>
+      <button class="nav-btn active" data-page="dashboard">
+        <span class="nav-icon">&#9670;</span> Dashboard
+      </button>
+      <button class="nav-btn" data-page="roles">
+        <span class="nav-icon">&#9733;</span> Roles
+      </button>
+      <button class="nav-btn" data-page="agents">
+        <span class="nav-icon">&#9673;</span> Agents
+      </button>
+      <button class="nav-btn" data-page="projects">
+        <span class="nav-icon">&#9674;</span> Projects
+      </button>
+      <button class="nav-btn" data-page="tasks">
+        <span class="nav-icon">&#9638;</span> Tasks
+      </button>
+      <button class="nav-btn" data-page="keys">
+        <span class="nav-icon">&#9919;</span> API Keys
+      </button>
+      <button class="nav-btn" data-page="chat">
+        <span class="nav-icon">&#9993;</span> Chat
+      </button>
+      <button class="nav-btn" data-page="audit">
+        <span class="nav-icon">&#9783;</span> Audit
+      </button>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="ws-status">
+        <div class="ws-dot" id="ws-dot"></div>
+        <span id="ws-label">Connecting...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Main Content ==================== -->
+  <div class="main-content">
+
+    <!-- Dashboard -->
+    <section id="page-dashboard" class="page-section active">
+      <h1 class="section-title">Dashboard</h1>
+      <p class="section-sub">Overview of your multi-agent platform</p>
+      <div id="dashboard-stats" class="stats-grid"></div>
+      <div id="dashboard-agents"></div>
+    </section>
+
+    <!-- Roles -->
+    <section id="page-roles" class="page-section">
+      <h1 class="section-title">Roles</h1>
+      <p class="section-sub">Define roles and responsibilities for your agents</p>
+      <div class="form">
+        <div class="form-title">Create New Role</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <select class="form-input" id="r-name-select" onchange="document.getElementById('r-name').value=this.value">
+              <option value="">-- Select or type --</option>
+              <option value="Scheduler">Scheduler</option>
+              <option value="Architect">Architect</option>
+              <option value="Backend Developer">Backend Developer</option>
+              <option value="Frontend Developer">Frontend Developer</option>
+              <option value="Reviewer">Reviewer</option>
+              <option value="Tester">Tester</option>
+              <option value="DevOps">DevOps</option>
+              <option value="Documentation">Documentation</option>
+            </select>
+            <input class="form-input" id="r-name" placeholder="Or type custom name..." style="margin-top:4px">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <input class="form-input" id="r-desc" placeholder="Responsibilities...">
+          </div>
+          <div class="form-group" style="max-width:120px">
+            <label class="form-label">Priority</label>
+            <input class="form-input" id="r-priority" type="number" value="0" min="0">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="addRole()">Create</button>
+          </div>
+        </div>
+      </div>
+      <table class="table">
+        <thead><tr><th>ID</th><th>Name</th><th>Description</th><th>Priority</th><th>Agents</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="roles-body"></tbody>
+      </table>
+      <div id="roles-empty" class="empty" style="display:none">No roles configured yet.</div>
+    </section>
+
+    <!-- Agents -->
+    <section id="page-agents" class="page-section">
+      <h1 class="section-title">Agents</h1>
+      <p class="section-sub">Manage your AI agents</p>
+      <div class="form">
+        <div class="form-title">Add New Agent</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" id="a-name" placeholder="e.g., my-hermes">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Type</label>
+            <select class="form-input" id="a-type">
+              <option value="hermes">Hermes</option>
+              <option value="claude-code">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="openclaw">OpenClaw</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Endpoint</label>
+            <input class="form-input" id="a-endpoint" placeholder="e.g., http://localhost:18789">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Binary Path</label>
+            <input class="form-input" id="a-binary" placeholder="e.g., /usr/local/bin/hermes">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Args (JSON)</label>
+            <input class="form-input" id="a-args" placeholder='e.g., {"timeout": 300}'>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role</label>
+            <select class="form-input" id="a-role">
+              <option value="">-- No Role --</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="addAgent()">Add Agent</button>
+          </div>
+        </div>
+      </div>
+      <table class="table">
+        <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Role</th><th>Endpoint</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="agents-body"></tbody>
+      </table>
+      <div id="agents-empty" class="empty" style="display:none">No agents configured yet.</div>
+    </section>
+
+    <!-- Projects -->
+    <section id="page-projects" class="page-section">
+      <h1 class="section-title">Projects</h1>
+      <p class="section-sub">Manage your development projects</p>
+      <div class="form">
+        <div class="form-title">Add New Project</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" id="p-name" placeholder="e.g., my-app">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Git Path</label>
+            <input class="form-input" id="p-git" placeholder="e.g., /home/user/projects/my-app">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Branch</label>
+            <input class="form-input" id="p-branch" value="main" placeholder="main">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="addProject()">Add Project</button>
+          </div>
+        </div>
+      </div>
+      <table class="table">
+        <thead><tr><th>ID</th><th>Name</th><th>Git Path</th><th>Branch</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody id="projects-body"></tbody>
+      </table>
+      <div id="projects-empty" class="empty" style="display:none">No projects configured yet.</div>
+    </section>
+
+    <!-- Tasks -->
+    <section id="page-tasks" class="page-section">
+      <h1 class="section-title">Task Board</h1>
+      <p class="section-sub">Manage tasks across your projects</p>
+      <div class="form">
+        <div class="form-title">Add New Task</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Project</label>
+            <select class="form-input" id="t-project"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Title</label>
+            <input class="form-input" id="t-title" placeholder="e.g., Implement login API">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <input class="form-input" id="t-desc" placeholder="Task details...">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="addTask()">Add Task</button>
+          </div>
+        </div>
+      </div>
+      <div id="task-board" class="kanban-board"></div>
+      <div id="tasks-empty" class="empty" style="display:none">No tasks yet.</div>
+    </section>
+
+    <!-- API Keys -->
+    <section id="page-keys" class="page-section">
+      <h1 class="section-title">API Keys</h1>
+      <p class="section-sub">Configure your LLM provider credentials</p>
+      <div class="form">
+        <div class="form-title">Add API Key</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Provider</label>
+            <select class="form-input" id="k-provider">
+              <option value="deepseek">DeepSeek</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="mimo">MIMO</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" id="k-name" placeholder="e.g., my-deepseek">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">API Key</label>
+            <input class="form-input" id="k-key" type="password" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Endpoint (optional)</label>
+            <input class="form-input" id="k-endpoint" placeholder="e.g., https://api.deepseek.com/v1">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="addAPIKey()">Add Key</button>
+          </div>
+        </div>
+      </div>
+      <table class="table">
+        <thead><tr><th>ID</th><th>Provider</th><th>Name</th><th>Key</th><th>Endpoint</th><th>Actions</th></tr></thead>
+        <tbody id="keys-body"></tbody>
+      </table>
+      <div id="keys-empty" class="empty" style="display:none">No API keys configured yet.</div>
+    </section>
+
+    <!-- Chat -->
+    <section id="page-chat" class="page-section">
+      <h1 class="section-title">Agent Chat</h1>
+      <p class="section-sub">Talk to your AI agents</p>
+      <div class="form">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Select Agent</label>
+            <select class="form-input" id="chat-agent" onchange="loadChat()"></select>
+          </div>
+          <div style="display:flex;align-items:flex-end;gap:8px">
+            <button class="btn btn-secondary" onclick="loadChat()">Refresh</button>
+            <button class="btn btn-danger" onclick="clearChat()">Clear</button>
+          </div>
+        </div>
+      </div>
+      <div id="chat-messages" class="chat-container"></div>
+      <div class="form" style="margin-top:12px">
+        <div class="form-row">
+          <div class="form-group">
+            <input class="form-input" id="chat-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendChat()">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="sendChat()">Send</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Audit -->
+    <section id="page-audit" class="page-section">
+      <h1 class="section-title">Audit Log</h1>
+      <p class="section-sub">System activity and token usage</p>
+      <div id="token-summary" class="stats-grid" style="margin-bottom:20px"></div>
+      <div class="form" style="margin-bottom:12px">
+        <div class="form-title">Token Usage Records</div>
+      </div>
+      <table class="table">
+        <thead><tr><th>ID</th><th>Model</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Cost</th><th>Time</th></tr></thead>
+        <tbody id="tokens-body"></tbody>
+      </table>
+      <div id="tokens-empty" class="empty" style="display:none">No token usage recorded yet.</div>
+    </section>
+
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
