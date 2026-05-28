@@ -227,72 +227,254 @@ async function agentStop(id) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-// ==================== Skills ====================
+// ==================== Skills (Enterprise Hub) ====================
+let allSkills = [];
+let currentSkillFilter = 'all';
+let selectedSkillId = null;
+
 async function loadSkills() {
   try {
-    const skills = (await api('/skills')) || [];
-    const tbody = document.getElementById('skills-body');
-    const empty = document.getElementById('skills-empty');
-
-    // Load stats
-    try {
-      const stats = await api('/skills/stats');
-      document.getElementById('skills-stats').innerHTML = [
-        { label: 'Total Skills', val: stats.total || 0, sub: (stats.enabled || 0) + ' enabled' },
-        { label: 'Total Uses', val: stats.total_uses || 0, sub: stats.most_used ? 'Top: ' + stats.most_used : '-' },
-      ].map(s =>
-        '<div class="stat-card">' +
-        '<div class="stat-label">' + s.label + '</div>' +
-        '<div class="stat-val">' + s.val + '</div>' +
-        '<div class="stat-sub">' + s.sub + '</div>' +
-        '</div>'
-      ).join('');
-    } catch (e) {}
-
-    if (skills.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
-    empty.style.display = 'none';
-
-    tbody.innerHTML = skills.map(s =>
-      '<tr><td>' + s.id + '</td>' +
-      '<td><strong>' + escapeHTML(s.name) + '</strong></td>' +
-      '<td><span class="badge badge-info">' + escapeHTML(s.category) + '</span></td>' +
-      '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(s.description) + '</td>' +
-      '<td>' + (s.use_count || 0) + '</td>' +
-      '<td>' + (s.enabled ? '<span class="badge badge-online">enabled</span>' : '<span class="badge badge-offline">disabled</span>') + '</td>' +
-      '<td>' +
-      '<button class="btn btn-sm btn-secondary" onclick="toggleSkill(' + s.id + ',' + !s.enabled + ')">' + (s.enabled ? 'Disable' : 'Enable') + '</button> ' +
-      '<button class="btn btn-danger btn-sm" onclick="deleteSkill(' + s.id + ')">Delete</button></td></tr>'
-    ).join('');
+    allSkills = (await api('/skills')) || [];
+    renderSkillStats();
+    renderSkillCards();
+    renderAgentSkillsMap();
+    if (selectedSkillId) showSkillDetail(selectedSkillId);
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function addSkill() {
+function renderSkillStats() {
+  const bar = document.getElementById('skills-stats-bar');
+  const total = allSkills.length;
+  const enabled = allSkills.filter(s => s.enabled).length;
+  const uses = allSkills.reduce((a, s) => a + (s.use_count || 0), 0);
+  const favs = allSkills.filter(s => s.favorite).length;
+  bar.innerHTML =
+    '<div class="stat-card"><div class="stat-label">Total</div><div class="stat-val">' + total + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Enabled</div><div class="stat-val">' + enabled + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Uses</div><div class="stat-val">' + uses + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Favorites</div><div class="stat-val">' + favs + '</div></div>';
+}
+
+function filterSkills() { renderSkillCards(); }
+
+function setSkillFilter(el, filter) {
+  currentSkillFilter = filter;
+  document.querySelectorAll('.skills-filter-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  renderSkillCards();
+}
+
+function renderSkillCards() {
+  const search = (document.getElementById('skill-search')?.value || '').toLowerCase();
+  const catFilter = document.getElementById('skill-cat-filter')?.value || 'all';
+  const grid = document.getElementById('skills-card-grid');
+  const empty = document.getElementById('skills-empty');
+
+  let filtered = allSkills.filter(s => {
+    if (search && !s.name.toLowerCase().includes(search) && !s.description.toLowerCase().includes(search)) return false;
+    if (catFilter !== 'all' && s.category !== catFilter) return false;
+    if (currentSkillFilter === 'favorite') return s.favorite;
+    if (currentSkillFilter === 'enabled') return s.enabled;
+    if (currentSkillFilter === 'disabled') return !s.enabled;
+    if (currentSkillFilter === 'github') return s.source === 'GitHub';
+    if (currentSkillFilter === 'team') return s.source === 'Team Shared';
+    if (currentSkillFilter === 'recent') return s.use_count > 0;
+    return true;
+  });
+
+  if (filtered.length === 0) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  grid.innerHTML = filtered.map(s => {
+    const tags = tryParseJSON(s.tags, []);
+    const sourceClass = 'skill-source-' + (s.source || 'Manual').replace(/\s/g, '');
+    return '<div class="skill-card" onclick="showSkillDetail(' + s.id + ')">' +
+      '<div class="skill-card-header">' +
+      '<span class="skill-name">' + escapeHTML(s.name) + '</span>' +
+      '<span class="skill-source ' + sourceClass + '">' + escapeHTML(s.source || 'Manual') + '</span>' +
+      '<span class="skill-fav" onclick="event.stopPropagation();toggleSkillFav(' + s.id + ')">' + (s.favorite ? '&#9733;' : '&#9734;') + '</span>' +
+      '</div>' +
+      '<div class="skill-card-desc">' + escapeHTML(s.description || 'No description') + '</div>' +
+      '<div class="skill-card-meta">' +
+      '<span class="badge badge-info">' + escapeHTML(s.category) + '</span>' +
+      '<span>v' + escapeHTML(s.version || '1.0') + '</span>' +
+      '<span>&#128260; ' + (s.use_count || 0) + ' uses</span>' +
+      '<span>' + (s.enabled ? '&#9989; Active' : '&#128683; Disabled') + '</span>' +
+      '</div>' +
+      (tags.length ? '<div class="skill-card-tags">' + tags.map(t => '<span class="skill-tag">' + escapeHTML(t) + '</span>').join('') + '</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+function tryParseJSON(str, fallback) { try { return JSON.parse(str); } catch { return fallback; } }
+
+async function showSkillDetail(id) {
+  selectedSkillId = id;
+  const panel = document.getElementById('skills-detail');
+  try {
+    const s = await api('/skills/' + id);
+    const logs = (await api('/skills/' + id + '/logs')) || [];
+
+    const tags = tryParseJSON(s.tags, []);
+    panel.innerHTML =
+      '<div class="detail-section">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div style="font-weight:700;font-size:16px">' + escapeHTML(s.name) + '</div>' +
+      '<span class="badge ' + (s.enabled ? 'badge-online' : 'badge-offline') + '">' + (s.enabled ? 'Active' : 'Disabled') + '</span>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-top:6px">' + escapeHTML(s.description || '') + '</div>' +
+      '</div>' +
+
+      '<div class="detail-section"><div class="detail-section-title">Info</div>' +
+      '<div class="detail-row"><span class="label">Category</span><span class="value">' + escapeHTML(s.category) + '</span></div>' +
+      '<div class="detail-row"><span class="label">Source</span><span class="value">' + escapeHTML(s.source || 'Manual') + '</span></div>' +
+      '<div class="detail-row"><span class="label">Version</span><span class="value">' + escapeHTML(s.version || '1.0') + '</span></div>' +
+      '<div class="detail-row"><span class="label">Uses</span><span class="value">' + (s.use_count || 0) + '</span></div>' +
+      (s.input_params ? '<div class="detail-row"><span class="label">Input</span><span class="value">' + escapeHTML(s.input_params) + '</span></div>' : '') +
+      (s.output_format ? '<div class="detail-row"><span class="label">Output</span><span class="value">' + escapeHTML(s.output_format) + '</span></div>' : '') +
+      (s.github_url ? '<div class="detail-row"><span class="label">GitHub</span><span class="value"><a href="' + escapeHTML(s.github_url) + '" target="_blank" style="color:var(--gold)">Link</a></span></div>' : '') +
+      '</div>' +
+
+      (tags.length ? '<div class="detail-section"><div class="detail-section-title">Tags</div><div class="skill-card-tags">' + tags.map(t => '<span class="skill-tag">' + escapeHTML(t) + '</span>').join('') + '</div></div>' : '') +
+
+      (s.content ? '<div class="detail-section"><div class="detail-section-title">Prompt</div><div style="font-size:11px;background:var(--bg);padding:8px;border-radius:6px;max-height:120px;overflow-y:auto;white-space:pre-wrap">' + escapeHTML(s.content) + '</div></div>' : '') +
+
+      '<div class="detail-section"><div class="detail-section-title">Actions</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      '<button class="btn btn-sm btn-secondary" onclick="toggleSkillEnabled(' + s.id + ',' + !s.enabled + ')">' + (s.enabled ? 'Disable' : 'Enable') + '</button>' +
+      '<button class="btn btn-sm btn-danger" onclick="deleteSkill(' + s.id + ')">Delete</button>' +
+      '</div></div>' +
+
+      '<div class="detail-section"><div class="detail-section-title">Recent Calls (' + logs.length + ')</div>' +
+      (logs.length === 0 ? '<div style="font-size:11px;color:var(--muted)">No calls recorded</div>' :
+        logs.slice(0, 10).map(l =>
+          '<div class="detail-log-item">' +
+          '<span class="' + (l.success ? 'log-success' : 'log-fail') + '">' + (l.success ? '&#10003;' : '&#10007;') + '</span> ' +
+          new Date(l.created_at).toLocaleString() +
+          (l.input ? ' <span style="color:var(--muted)">' + escapeHTML(l.input).substring(0, 40) + '</span>' : '') +
+          '</div>'
+        ).join('')) +
+      '</div>';
+  } catch (e) { panel.innerHTML = '<div class="empty">Error loading skill</div>'; }
+}
+
+async function renderAgentSkillsMap() {
+  const panel = document.getElementById('skills-agent-map');
+  try {
+    const agents = (await api('/agents')) || [];
+    const map = await api('/skills/agent-map');
+    panel.innerHTML = '<div class="detail-section-title" style="margin-bottom:8px">Agent Skills</div>' +
+      agents.map(a => {
+        const skills = map[a.id] || [];
+        return '<div style="margin-bottom:10px">' +
+          '<div style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:4px"><span class="status-dot" style="background:' + getStatusColor(a.status) + '"></span>' + escapeHTML(a.name) + '</div>' +
+          (skills.length ? '<div style="margin-top:4px">' + skills.map(s => '<span class="skill-mini" style="cursor:pointer" onclick="showSkillDetail(' + s.id + ')">' + escapeHTML(s.name) + '</span>').join('') + '</div>' :
+            '<div style="font-size:10px;color:var(--muted);margin-top:2px">No skills bound</div>') +
+          '</div>';
+      }).join('') +
+      '<hr style="border:none;border-top:1px solid var(--border);margin:12px 0">';
+  } catch (e) {}
+}
+
+function showCreateSkillModal() {
+  document.getElementById('modal-create-skill').style.display = 'flex';
+  document.getElementById('cs-name').focus();
+}
+
+async function createSkill() {
+  const tagsStr = document.getElementById('cs-tags').value.trim();
+  const tags = tagsStr ? JSON.stringify(tagsStr.split(',').map(t => t.trim()).filter(Boolean)) : '[]';
   const data = {
-    name: document.getElementById('sk-name').value.trim(),
-    category: document.getElementById('sk-category').value,
-    description: document.getElementById('sk-desc').value.trim(),
-    content: document.getElementById('sk-content').value.trim(),
+    name: document.getElementById('cs-name').value.trim(),
+    category: document.getElementById('cs-category').value,
+    description: document.getElementById('cs-desc').value.trim(),
+    content: document.getElementById('cs-content').value.trim(),
+    tags: tags,
+    version: document.getElementById('cs-version').value.trim() || '1.0',
+    input_params: document.getElementById('cs-input').value.trim(),
+    output_format: document.getElementById('cs-output').value.trim(),
+    source: 'Manual',
   };
   if (!data.name) { toast('Name is required', 'error'); return; }
   try {
     await api('/skills', { method: 'POST', body: JSON.stringify(data) });
     toast('Skill created');
-    ['sk-name', 'sk-desc', 'sk-content'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('modal-create-skill').style.display = 'none';
+    ['cs-name', 'cs-desc', 'cs-tags', 'cs-input', 'cs-output', 'cs-content'].forEach(id => document.getElementById(id).value = '');
     loadSkills();
   } catch (e) { toast(e.message, 'error'); }
 }
 
 async function deleteSkill(id) {
   if (!confirm('Delete this skill?')) return;
-  try { await api('/skills/' + id, { method: 'DELETE' }); toast('Skill deleted'); loadSkills(); } catch (e) { toast(e.message, 'error'); }
+  try { await api('/skills/' + id, { method: 'DELETE' }); toast('Skill deleted'); selectedSkillId = null; loadSkills(); } catch (e) { toast(e.message, 'error'); }
 }
 
-async function toggleSkill(id, enabled) {
+async function toggleSkillEnabled(id, enabled) {
   try {
     const skill = await api('/skills/' + id);
     skill.enabled = enabled;
     await api('/skills/' + id, { method: 'PUT', body: JSON.stringify(skill) });
     toast('Skill ' + (enabled ? 'enabled' : 'disabled'));
+    loadSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function toggleSkillFav(id) {
+  try { await api('/skills/' + id + '/favorite', { method: 'POST' }); loadSkills(); } catch (e) { toast(e.message, 'error'); }
+}
+
+// ==================== GitHub Import ====================
+function showGitHubImportModal() {
+  document.getElementById('modal-github-import').style.display = 'flex';
+  document.getElementById('gh-query').focus();
+}
+
+async function searchGitHub() {
+  const q = document.getElementById('gh-query').value.trim();
+  if (!q) return;
+  const results = document.getElementById('gh-results');
+  results.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted)">Searching...</div>';
+  try {
+    const resp = await fetch('https://api.github.com/search/repositories?q=' + encodeURIComponent(q) + '&sort=stars&per_page=10');
+    const data = await resp.json();
+    if (!data.items || data.items.length === 0) {
+      results.innerHTML = '<div class="empty">No results found</div>';
+      return;
+    }
+    results.innerHTML = data.items.map(r =>
+      '<div class="gh-result-item">' +
+      '<div class="gh-result-header"><span class="gh-result-name">' + escapeHTML(r.full_name) + '</span><span class="gh-result-stars">&#9733; ' + (r.stargazers_count || 0) + '</span></div>' +
+      '<div class="gh-result-desc">' + escapeHTML(r.description || 'No description') + '</div>' +
+      '<div class="gh-result-meta">' +
+      (r.language ? '<span>' + escapeHTML(r.language) + '</span>' : '') +
+      '<span>Updated: ' + new Date(r.updated_at).toLocaleDateString() + '</span>' +
+      '</div>' +
+      '<div style="margin-top:8px;display:flex;gap:6px">' +
+      '<button class="btn btn-sm btn-primary" onclick="importGitHubSkill(\'' + escapeHTML(r.full_name) + '\',\'' + escapeHTML(r.description || '') + '\',\'' + escapeHTML(r.html_url) + '\')">Import</button>' +
+      '<a class="btn btn-sm btn-secondary" href="' + escapeHTML(r.html_url) + '" target="_blank">View Repo</a>' +
+      '</div>' +
+      '</div>'
+    ).join('');
+  } catch (e) { results.innerHTML = '<div class="empty">Search failed: ' + e.message + '</div>'; }
+}
+
+async function importGitHubSkill(name, desc, url) {
+  const skillName = name.split('/').pop() || name;
+  const data = {
+    name: skillName,
+    category: 'DevOps',
+    description: desc || 'Imported from ' + name,
+    content: '',
+    source: 'GitHub',
+    github_url: url,
+    tags: JSON.stringify(['github', 'imported']),
+    version: '1.0',
+  };
+  try {
+    await api('/skills', { method: 'POST', body: JSON.stringify(data) });
+    toast('Imported: ' + skillName);
+    document.getElementById('modal-github-import').style.display = 'none';
     loadSkills();
   } catch (e) { toast(e.message, 'error'); }
 }

@@ -169,19 +169,14 @@
     </section>
 
     <!-- Skills -->
-    <section id="page-skills" class="page-section">
-      <h1 class="section-title">Skills Library</h1>
-      <p class="section-sub">Reusable team capabilities shared across roles and agents</p>
-      <div class="form">
-        <div class="form-title">Create New Skill</div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Name</label>
-            <input class="form-input" id="sk-name" placeholder="e.g., Go REST API Generator">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Category</label>
-            <select class="form-input" id="sk-category">
+    <section id="page-skills" class="page-section" style="padding:0;height:calc(100vh - 60px);overflow:hidden">
+      <div class="skills-panel">
+        <!-- Left: Category Nav -->
+        <div class="skills-nav">
+          <div class="skills-nav-header">
+            <input class="form-input" id="skill-search" placeholder="Search skills..." oninput="filterSkills()">
+            <select class="form-input" id="skill-cat-filter" onchange="filterSkills()" style="margin-top:6px">
+              <option value="all">All Categories</option>
               <option value="Planning">Planning</option>
               <option value="Architecture">Architecture</option>
               <option value="Go Backend">Go Backend</option>
@@ -194,31 +189,34 @@
               <option value="Security">Security</option>
             </select>
           </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Description</label>
-            <input class="form-input" id="sk-desc" placeholder="What this skill does...">
+          <div class="skills-filter-list">
+            <div class="skills-filter-item active" data-filter="all" onclick="setSkillFilter(this,'all')">All Skills</div>
+            <div class="skills-filter-item" data-filter="favorite" onclick="setSkillFilter(this,'favorite')">Favorites</div>
+            <div class="skills-filter-item" data-filter="enabled" onclick="setSkillFilter(this,'enabled')">Enabled</div>
+            <div class="skills-filter-item" data-filter="disabled" onclick="setSkillFilter(this,'disabled')">Disabled</div>
+            <div class="skills-filter-item" data-filter="github" onclick="setSkillFilter(this,'github')">GitHub Imported</div>
+            <div class="skills-filter-item" data-filter="team" onclick="setSkillFilter(this,'team')">Team Shared</div>
+            <div class="skills-filter-item" data-filter="recent" onclick="setSkillFilter(this,'recent')">Recently Used</div>
+          </div>
+          <div class="skills-nav-footer">
+            <button class="btn btn-primary" style="width:100%;margin-bottom:6px" onclick="showCreateSkillModal()">+ Create Skill</button>
+            <button class="btn btn-secondary" style="width:100%" onclick="showGitHubImportModal()">&#128279; Import from GitHub</button>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Prompt Content</label>
-            <textarea class="form-input" id="sk-content" rows="4" placeholder="The skill prompt/instructions..."></textarea>
-          </div>
+
+        <!-- Center: Skill Cards -->
+        <div class="skills-workspace">
+          <div id="skills-stats-bar" class="skills-stats-bar"></div>
+          <div id="skills-card-grid" class="skills-card-grid"></div>
+          <div id="skills-empty" class="empty" style="display:none">No skills found.</div>
         </div>
-        <div class="form-row">
-          <div style="display:flex;align-items:flex-end">
-            <button class="btn btn-primary" onclick="addSkill()">Create Skill</button>
-          </div>
+
+        <!-- Right: Detail / Agent Map -->
+        <div class="skills-detail-panel">
+          <div id="skills-agent-map"></div>
+          <div id="skills-detail"></div>
         </div>
       </div>
-      <div id="skills-stats" class="stats-grid" style="margin-bottom:16px"></div>
-      <table class="table">
-        <thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Description</th><th>Uses</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="skills-body"></tbody>
-      </table>
-      <div id="skills-empty" class="empty" style="display:none">No skills created yet.</div>
     </section>
 
     <!-- Projects -->
@@ -410,6 +408,50 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="document.getElementById('modal-new-project').style.display='none'">Cancel</button>
       <button class="btn btn-primary" onclick="createProject()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Skill Modal -->
+<div class="modal-overlay" id="modal-create-skill" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" style="width:600px">
+    <div class="modal-title">Create New Skill</div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Name</label><input class="form-input" id="cs-name" placeholder="e.g., Go REST API Generator"></div>
+      <div class="form-group"><label class="form-label">Category</label>
+        <select class="form-input" id="cs-category">
+          <option value="Planning">Planning</option><option value="Architecture">Architecture</option><option value="Go Backend">Go Backend</option>
+          <option value="Frontend UI">Frontend UI</option><option value="Code Review">Code Review</option><option value="Testing">Testing</option>
+          <option value="Git">Git</option><option value="DevOps">DevOps</option><option value="Documentation">Documentation</option><option value="Security">Security</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group" style="flex:1"><label class="form-label">Description</label><input class="form-input" id="cs-desc" placeholder="What this skill does..."></div></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><label class="form-label">Tags (comma separated)</label><input class="form-input" id="cs-tags" placeholder="go, api, rest"></div>
+      <div class="form-group"><label class="form-label">Version</label><input class="form-input" id="cs-version" value="1.0"></div>
+    </div>
+    <div class="form-row"><div class="form-group" style="flex:1"><label class="form-label">Input Parameters</label><input class="form-input" id="cs-input" placeholder="e.g., task description, file path"></div></div>
+    <div class="form-row"><div class="form-group" style="flex:1"><label class="form-label">Output Format</label><input class="form-input" id="cs-output" placeholder="e.g., Go source code, JSON"></div></div>
+    <div class="form-row"><div class="form-group" style="flex:1"><label class="form-label">Prompt Content</label><textarea class="form-input" id="cs-content" rows="5" placeholder="The skill prompt/instructions..."></textarea></div></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="document.getElementById('modal-create-skill').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" onclick="createSkill()">Create Skill</button>
+    </div>
+  </div>
+</div>
+
+<!-- GitHub Import Modal -->
+<div class="modal-overlay" id="modal-github-import" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" style="width:700px">
+    <div class="modal-title">&#128279; Import Skill from GitHub</div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1"><input class="form-input" id="gh-query" placeholder="Search: python tool, mcp skill, ai workflow..." onkeydown="if(event.key==='Enter')searchGitHub()"></div>
+      <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="searchGitHub()">Search</button></div>
+    </div>
+    <div id="gh-results" style="max-height:400px;overflow-y:auto;margin-top:12px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="document.getElementById('modal-github-import').style.display='none'">Close</button>
     </div>
   </div>
 </div>

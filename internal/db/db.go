@@ -189,6 +189,14 @@ func (db *DB) migrate() error {
 		`ALTER TABLE tasks ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE tasks ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE tasks ADD COLUMN updated_at DATETIME`,
+		// Skill enhancements
+		`ALTER TABLE skills ADD COLUMN source TEXT NOT NULL DEFAULT 'Manual'`,
+		`ALTER TABLE skills ADD COLUMN version TEXT NOT NULL DEFAULT '1.0'`,
+		`ALTER TABLE skills ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE skills ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE skills ADD COLUMN input_params TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE skills ADD COLUMN output_format TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE skills ADD COLUMN github_url TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS skills (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			uuid TEXT NOT NULL UNIQUE,
@@ -229,6 +237,17 @@ func (db *DB) migrate() error {
 			FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
 			UNIQUE(project_id, skill_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS skill_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			skill_id INTEGER NOT NULL,
+			agent_id INTEGER DEFAULT NULL,
+			project_id INTEGER DEFAULT NULL,
+			input TEXT NOT NULL DEFAULT '',
+			output TEXT NOT NULL DEFAULT '',
+			success INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
+		)`,
 	}
 	for _, q := range incrementalMigrations {
 		if _, err := db.Conn.Exec(q); err != nil {
@@ -240,7 +259,7 @@ func (db *DB) migrate() error {
 	}
 
 	// Verify tables exist
-	for _, table := range []string{"agents", "api_keys", "projects", "tasks", "task_edges", "chat_messages", "token_usage", "memories", "roles", "agent_roles", "skills", "role_skills", "agent_skills", "project_skills"} {
+	for _, table := range []string{"agents", "api_keys", "projects", "tasks", "task_edges", "chat_messages", "token_usage", "memories", "roles", "agent_roles", "skills", "role_skills", "agent_skills", "project_skills", "skill_logs"} {
 		var count int
 		err := db.Conn.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
 		if err != nil {

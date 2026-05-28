@@ -118,9 +118,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills", s.listSkills)
 	mux.HandleFunc("POST /api/skills", s.createSkill)
 	mux.HandleFunc("GET /api/skills/stats", s.getSkillsStats)
+	mux.HandleFunc("GET /api/skills/agent-map", s.getAgentSkillsMap)
 	mux.HandleFunc("GET /api/skills/{id}", s.getSkill)
 	mux.HandleFunc("PUT /api/skills/{id}", s.updateSkill)
 	mux.HandleFunc("DELETE /api/skills/{id}", s.deleteSkill)
+	mux.HandleFunc("POST /api/skills/{id}/favorite", s.toggleSkillFavorite)
+	mux.HandleFunc("GET /api/skills/{id}/logs", s.getSkillLogs)
 
 	// Role-Skill binding
 	mux.HandleFunc("GET /api/roles/{id}/skills", s.listRoleSkills)
@@ -1288,6 +1291,42 @@ func (s *Server) getSkillsStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) toggleSkillFavorite(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.db.ToggleSkillFavorite(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "toggled"})
+}
+
+func (s *Server) getSkillLogs(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	logs, err := s.db.ListSkillLogs(id, 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
+}
+
+func (s *Server) getAgentSkillsMap(w http.ResponseWriter, r *http.Request) {
+	m, err := s.db.ListAgentSkillsMap()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
 // === Role-Skill Handlers ===
