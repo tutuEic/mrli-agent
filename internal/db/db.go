@@ -174,6 +174,21 @@ func (db *DB) migrate() error {
 		`ALTER TABLE agents ADD COLUMN last_seen DATETIME`,
 		`ALTER TABLE agents ADD COLUMN health_info TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN recover_count INTEGER NOT NULL DEFAULT 0`,
+		// Project enhancements
+		`ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'Draft'`,
+		`ALTER TABLE projects ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE projects ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE projects ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE projects ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE projects ADD COLUMN updated_at DATETIME`,
+		// Task enhancements
+		`ALTER TABLE tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE tasks ADD COLUMN stage TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN deadline DATETIME`,
+		`ALTER TABLE tasks ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE tasks ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE tasks ADD COLUMN updated_at DATETIME`,
 		`CREATE TABLE IF NOT EXISTS skills (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			uuid TEXT NOT NULL UNIQUE,
@@ -204,6 +219,16 @@ func (db *DB) migrate() error {
 			FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
 			UNIQUE(agent_id, skill_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS project_skills (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL,
+			skill_id INTEGER NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+			UNIQUE(project_id, skill_id)
+		)`,
 	}
 	for _, q := range incrementalMigrations {
 		if _, err := db.Conn.Exec(q); err != nil {
@@ -215,7 +240,7 @@ func (db *DB) migrate() error {
 	}
 
 	// Verify tables exist
-	for _, table := range []string{"agents", "api_keys", "projects", "tasks", "task_edges", "chat_messages", "token_usage", "memories", "roles", "agent_roles", "skills", "role_skills", "agent_skills"} {
+	for _, table := range []string{"agents", "api_keys", "projects", "tasks", "task_edges", "chat_messages", "token_usage", "memories", "roles", "agent_roles", "skills", "role_skills", "agent_skills", "project_skills"} {
 		var count int
 		err := db.Conn.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
 		if err != nil {

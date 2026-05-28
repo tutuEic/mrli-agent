@@ -57,6 +57,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}", s.getProject)
 	mux.HandleFunc("PUT /api/projects/{id}", s.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.deleteProject)
+	mux.HandleFunc("GET /api/projects/{id}/stats", s.getProjectStats)
+	mux.HandleFunc("POST /api/projects/{id}/pause", s.pauseProject)
+	mux.HandleFunc("POST /api/projects/{id}/resume", s.resumeProject)
+	mux.HandleFunc("POST /api/projects/{id}/favorite", s.toggleProjectFavorite)
+	mux.HandleFunc("GET /api/projects/{id}/skills", s.listProjectSkills)
+	mux.HandleFunc("POST /api/projects/{id}/skills", s.bindProjectSkill)
+	mux.HandleFunc("DELETE /api/projects/{id}/skills/{skill_id}", s.unbindProjectSkill)
 
 	// Tasks CRUD
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
@@ -375,6 +382,12 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	if p.Branch == "" {
 		p.Branch = "main"
 	}
+	if p.Tags == "" {
+		p.Tags = "[]"
+	}
+	if p.Status == "" {
+		p.Status = "Draft"
+	}
 
 	if err := s.db.CreateProject(&p); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -439,6 +452,111 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) getProjectStats(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	stats, err := s.db.GetProjectStats(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) pauseProject(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.db.UpdateProjectStatus(id, "Blocked"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "paused"})
+}
+
+func (s *Server) resumeProject(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.db.UpdateProjectStatus(id, "Active"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resumed"})
+}
+
+func (s *Server) toggleProjectFavorite(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.db.ToggleProjectFavorite(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "toggled"})
+}
+
+func (s *Server) listProjectSkills(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	skills, err := s.db.ListProjectSkills(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, skills)
+}
+
+func (s *Server) bindProjectSkill(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	var body struct {
+		SkillID int64 `json:"skill_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := s.db.BindProjectSkill(projectID, body.SkillID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "bound"})
+}
+
+func (s *Server) unbindProjectSkill(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	skillID, err := parseID(r.PathValue("skill_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid skill id")
+		return
+	}
+	if err := s.db.UnbindProjectSkill(projectID, skillID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unbound"})
 }
 
 // === Tasks Handlers ===
@@ -518,14 +636,19 @@ func (s *Server) updateTaskStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Status string `json:"status"`
+		Status   string `json:"status"`
+		Progress *int   `json:"progress"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 
-	if err := s.db.UpdateTaskStatus(id, body.Status); err != nil {
+	progress := 0
+	if body.Progress != nil {
+		progress = *body.Progress
+	}
+	if err := s.db.UpdateTaskStatus(id, body.Status, progress); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -12,21 +13,30 @@ type Task struct {
 	ParentID        *int64     `json:"parent_id"`
 	Title           string     `json:"title"`
 	Description     string     `json:"description"`
-	Status          string     `json:"status"` // todo, running, review, done, failed
+	Status          string     `json:"status"` // pending, assigned, running, waiting, review, failed, completed
 	AssignedAgentID *int64     `json:"assigned_agent_id"`
 	Priority        int        `json:"priority"`
 	DAGLevel        int        `json:"dag_level"`
 	Result          string     `json:"result"`
+	Progress        int        `json:"progress"` // 0-100
+	Stage           string     `json:"stage"`    // current stage name
+	Deadline        *time.Time `json:"deadline"`
+	Tags            string     `json:"tags"`        // JSON array
+	Attachments     string     `json:"attachments"` // JSON array
 	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       *time.Time `json:"updated_at"`
 }
 
 // CreateTask inserts a new task.
 func (db *DB) CreateTask(t *Task) error {
 	now := Now()
+	if t.Status == "" {
+		t.Status = "pending"
+	}
 	result, err := db.Conn.Exec(
-		`INSERT INTO tasks (project_id, parent_id, title, description, status, assigned_agent_id, priority, dag_level, result, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ProjectID, t.ParentID, t.Title, t.Description, t.Status, t.AssignedAgentID, t.Priority, t.DAGLevel, t.Result, now,
+		`INSERT INTO tasks (project_id, parent_id, title, description, status, assigned_agent_id, priority, dag_level, result, progress, stage, deadline, tags, attachments, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ProjectID, t.ParentID, t.Title, t.Description, t.Status, t.AssignedAgentID, t.Priority, t.DAGLevel, t.Result, t.Progress, t.Stage, t.Deadline, t.Tags, t.Attachments, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task: %w", err)
@@ -40,11 +50,32 @@ func (db *DB) CreateTask(t *Task) error {
 	return nil
 }
 
+// taskColumns is the SELECT column list for tasks.
+const taskColumns = `id, project_id, parent_id, title, description, status, assigned_agent_id, priority, dag_level, result, progress, stage, deadline, tags, attachments, created_at, updated_at`
+
+// scanTask scans a task row.
+func scanTask(scanner interface{ Scan(...any) error }) (Task, error) {
+	var t Task
+	var deadline, updatedAt sql.NullTime
+	err := scanner.Scan(&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description, &t.Status,
+		&t.AssignedAgentID, &t.Priority, &t.DAGLevel, &t.Result, &t.Progress, &t.Stage,
+		&deadline, &t.Tags, &t.Attachments, &t.CreatedAt, &updatedAt)
+	if err != nil {
+		return t, err
+	}
+	if deadline.Valid {
+		t.Deadline = &deadline.Time
+	}
+	if updatedAt.Valid {
+		t.UpdatedAt = &updatedAt.Time
+	}
+	return t, nil
+}
+
 // ListTasks returns all tasks for a project, ordered by DAG level and priority.
 func (db *DB) ListTasks(projectID int64) ([]Task, error) {
 	rows, err := db.Conn.Query(
-		`SELECT id, project_id, parent_id, title, description, status, assigned_agent_id, priority, dag_level, result, created_at
-		 FROM tasks WHERE project_id = ? ORDER BY dag_level, priority DESC, id`,
+		`SELECT `+taskColumns+` FROM tasks WHERE project_id = ? ORDER BY dag_level, priority DESC, id`,
 		projectID,
 	)
 	if err != nil {
@@ -54,8 +85,8 @@ func (db *DB) ListTasks(projectID int64) ([]Task, error) {
 
 	var tasks []Task
 	for rows.Next() {
-		var t Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description, &t.Status, &t.AssignedAgentID, &t.Priority, &t.DAGLevel, &t.Result, &t.CreatedAt); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -66,8 +97,7 @@ func (db *DB) ListTasks(projectID int64) ([]Task, error) {
 // ListAllTasks returns all tasks across all projects.
 func (db *DB) ListAllTasks() ([]Task, error) {
 	rows, err := db.Conn.Query(
-		`SELECT id, project_id, parent_id, title, description, status, assigned_agent_id, priority, dag_level, result, created_at
-		 FROM tasks ORDER BY project_id, dag_level, priority DESC, id`,
+		`SELECT `+taskColumns+` FROM tasks ORDER BY project_id, dag_level, priority DESC, id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)
@@ -76,8 +106,8 @@ func (db *DB) ListAllTasks() ([]Task, error) {
 
 	var tasks []Task
 	for rows.Next() {
-		var t Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description, &t.Status, &t.AssignedAgentID, &t.Priority, &t.DAGLevel, &t.Result, &t.CreatedAt); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -87,20 +117,34 @@ func (db *DB) ListAllTasks() ([]Task, error) {
 
 // GetTask returns a single task by ID.
 func (db *DB) GetTask(id int64) (*Task, error) {
-	var t Task
-	err := db.Conn.QueryRow(
-		`SELECT id, project_id, parent_id, title, description, status, assigned_agent_id, priority, dag_level, result, created_at
-		 FROM tasks WHERE id = ?`, id,
-	).Scan(&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description, &t.Status, &t.AssignedAgentID, &t.Priority, &t.DAGLevel, &t.Result, &t.CreatedAt)
+	t, err := scanTask(db.Conn.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id))
 	if err != nil {
 		return nil, fmt.Errorf("get task %d: %w", id, err)
 	}
 	return &t, nil
 }
 
-// UpdateTaskStatus updates only the status field.
-func (db *DB) UpdateTaskStatus(id int64, status string) error {
-	result, err := db.Conn.Exec(`UPDATE tasks SET status=? WHERE id=?`, status, id)
+// UpdateTask updates a task.
+func (db *DB) UpdateTask(t *Task) error {
+	now := Now()
+	result, err := db.Conn.Exec(
+		`UPDATE tasks SET title=?, description=?, status=?, assigned_agent_id=?, priority=?, progress=?, stage=?, deadline=?, tags=?, updated_at=?
+		 WHERE id=?`,
+		t.Title, t.Description, t.Status, t.AssignedAgentID, t.Priority, t.Progress, t.Stage, t.Deadline, t.Tags, now, t.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update task %d: %w", t.ID, err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task %d not found", t.ID)
+	}
+	return nil
+}
+
+// UpdateTaskStatus updates only the status and progress fields.
+func (db *DB) UpdateTaskStatus(id int64, status string, progress int) error {
+	result, err := db.Conn.Exec(`UPDATE tasks SET status=?, progress=?, updated_at=? WHERE id=?`, status, progress, Now(), id)
 	if err != nil {
 		return fmt.Errorf("update task status: %w", err)
 	}
@@ -113,7 +157,7 @@ func (db *DB) UpdateTaskStatus(id int64, status string) error {
 
 // AssignTask assigns an agent to a task.
 func (db *DB) AssignTask(taskID, agentID int64) error {
-	result, err := db.Conn.Exec(`UPDATE tasks SET assigned_agent_id=?, status='running' WHERE id=?`, agentID, taskID)
+	result, err := db.Conn.Exec(`UPDATE tasks SET assigned_agent_id=?, status='assigned', updated_at=? WHERE id=?`, agentID, Now(), taskID)
 	if err != nil {
 		return fmt.Errorf("assign task: %w", err)
 	}
@@ -126,7 +170,7 @@ func (db *DB) AssignTask(taskID, agentID int64) error {
 
 // UpdateTaskResult updates the result field and sets status.
 func (db *DB) UpdateTaskResult(id int64, status, result string) error {
-	res, err := db.Conn.Exec(`UPDATE tasks SET status=?, result=? WHERE id=?`, status, result, id)
+	res, err := db.Conn.Exec(`UPDATE tasks SET status=?, result=?, updated_at=? WHERE id=?`, status, result, Now(), id)
 	if err != nil {
 		return fmt.Errorf("update task result: %w", err)
 	}

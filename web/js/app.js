@@ -297,45 +297,240 @@ async function toggleSkill(id, enabled) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-// ==================== Projects ====================
+// ==================== Projects (New Panel) ====================
+let allProjects = [];
+let currentProjectId = null;
+let currentProjectView = 'list';
+
 async function loadProjects() {
   try {
-    const projects = (await api('/projects')) || [];
-    const tbody = document.getElementById('projects-body');
-    const empty = document.getElementById('projects-empty');
-
-    if (projects.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
-    empty.style.display = 'none';
-
-    tbody.innerHTML = projects.map(p =>
-      '<tr><td>' + p.id + '</td>' +
-      '<td><strong>' + p.name + '</strong></td>' +
-      '<td class="mono">' + (p.git_path || '-') + '</td>' +
-      '<td>' + (p.branch || 'main') + '</td>' +
-      '<td>' + new Date(p.created_at).toLocaleDateString() + '</td>' +
-      '<td><button class="btn btn-danger btn-sm" onclick="deleteProject(' + p.id + ')">Delete</button></td></tr>'
-    ).join('');
+    allProjects = (await api('/projects')) || [];
+    renderProjectList();
+    if (currentProjectId) {
+      selectProject(currentProjectId);
+    }
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function addProject() {
+function renderProjectList() {
+  const search = (document.getElementById('project-search')?.value || '').toLowerCase();
+  const filter = document.getElementById('project-filter')?.value || 'all';
+  const list = document.getElementById('project-list');
+  if (!list) return;
+
+  let filtered = allProjects.filter(p => {
+    if (search && !p.name.toLowerCase().includes(search)) return false;
+    if (filter === 'favorite') return p.favorite;
+    if (filter !== 'all' && p.status !== filter) return false;
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No projects found</div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(p => {
+    const statusColor = { Draft: '#95a5a6', Active: '#27ae60', Running: '#3498db', Blocked: '#e74c3c', Completed: '#2ecc71', Archived: '#7f8c8d' }[p.status] || '#95a5a6';
+    return '<div class="project-list-item' + (p.id === currentProjectId ? ' active' : '') + '" onclick="selectProject(' + p.id + ')">' +
+      '<span class="proj-fav" onclick="event.stopPropagation();toggleFavorite(' + p.id + ')">' + (p.favorite ? '&#9733;' : '&#9734;') + '</span>' +
+      '<span class="proj-name">' + escapeHTML(p.name) + '</span>' +
+      '<span class="proj-status badge" style="background:' + statusColor + '20;color:' + statusColor + '">' + p.status + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function filterProjects() { renderProjectList(); }
+
+async function selectProject(id) {
+  currentProjectId = id;
+  renderProjectList();
+  document.getElementById('project-empty').style.display = 'none';
+  document.getElementById('project-detail').style.display = 'block';
+
+  try {
+    const p = await api('/projects/' + id);
+    const stats = await api('/projects/' + id + '/stats');
+    const tasks = (await api('/tasks?project_id=' + id)) || [];
+    const agents = (await api('/agents')) || [];
+    const skills = (await api('/projects/' + id + '/skills')) || [];
+
+    renderProjectHeader(p, stats);
+    renderProjectActions(p);
+    renderProjectTasks(tasks);
+    renderProjectKanban(tasks);
+    renderProjectStats(stats);
+    renderProjectAgents(agents);
+    renderProjectSkills(skills);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderProjectHeader(p, stats) {
+  const h = document.getElementById('project-header');
+  const rate = Math.round(stats.completion_rate || 0);
+  const statusColors = { Draft: '#95a5a6', Active: '#27ae60', Running: '#3498db', Blocked: '#e74c3c', Completed: '#2ecc71', Archived: '#7f8c8d' };
+  h.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px">' +
+    '<h2>' + escapeHTML(p.name) + '</h2>' +
+    '<span class="badge" style="background:' + (statusColors[p.status] || '#95a5a6') + '20;color:' + (statusColors[p.status] || '#95a5a6') + '">' + p.status + '</span>' +
+    '<span class="badge badge-info">P' + p.priority + '</span>' +
+    '</div>' +
+    (p.description ? '<div style="font-size:13px;color:var(--text2);margin:6px 0">' + escapeHTML(p.description) + '</div>' : '') +
+    '<div class="project-meta">' +
+    (p.owner ? '<span class="project-meta-item">&#128100; ' + escapeHTML(p.owner) + '</span>' : '') +
+    '<span class="project-meta-item">&#128202; ' + (stats.total_tasks || 0) + ' tasks</span>' +
+    '<span class="project-meta-item">&#9989; ' + rate + '% complete</span>' +
+    '<span class="project-meta-item">&#129302; ' + (stats.online_agents || 0) + ' agents online</span>' +
+    '<span class="project-meta-item">&#128197; ' + new Date(p.created_at).toLocaleDateString() + '</span>' +
+    '</div>';
+}
+
+function renderProjectActions(p) {
+  const a = document.getElementById('project-actions');
+  const isPaused = p.status === 'Blocked';
+  a.innerHTML =
+    '<button class="btn btn-sm btn-primary" onclick="showNewTaskModal(' + p.id + ')">+ New Task</button>' +
+    (isPaused
+      ? '<button class="btn btn-sm btn-wake" onclick="resumeProject(' + p.id + ')">&#9654; Resume</button>'
+      : '<button class="btn btn-sm btn-stop" onclick="pauseProject(' + p.id + ')">&#9646;&#9646; Pause</button>') +
+    '<button class="btn btn-sm btn-secondary" onclick="deleteProject(' + p.id + ')">&#128465; Delete</button>';
+}
+
+function renderProjectTasks(tasks) {
+  const c = document.getElementById('project-task-list');
+  if (tasks.length === 0) {
+    c.innerHTML = '<div class="empty">No tasks yet. Click "+ New Task" to create one.</div>';
+    return;
+  }
+  const statusColors = { pending: '#95a5a6', assigned: '#3498db', running: '#f39c12', waiting: '#9b59b6', review: '#e67e22', failed: '#e74c3c', completed: '#27ae60' };
+  c.innerHTML = tasks.map(t => {
+    const color = statusColors[t.status] || '#95a5a6';
+    return '<div class="task-row">' +
+      '<span style="width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0"></span>' +
+      '<span class="task-title">' + escapeHTML(t.title) + '</span>' +
+      '<span class="badge" style="background:' + color + '20;color:' + color + ';font-size:10px">' + t.status + '</span>' +
+      '<div class="task-progress"><div class="progress-bar"><div class="progress-fill" style="width:' + t.progress + '%;background:' + color + '"></div></div></div>' +
+      '<span style="font-size:11px;color:var(--muted);width:35px">' + t.progress + '%</span>' +
+      '</div>';
+  }).join('');
+}
+
+function renderProjectKanban(tasks) {
+  const c = document.getElementById('project-kanban');
+  const cols = [
+    { key: 'pending', label: 'To Do', color: '#95a5a6' },
+    { key: 'assigned', label: 'Assigned', color: '#3498db' },
+    { key: 'running', label: 'In Progress', color: '#f39c12' },
+    { key: 'review', label: 'Review', color: '#e67e22' },
+    { key: 'completed', label: 'Done', color: '#27ae60' },
+    { key: 'failed', label: 'Failed', color: '#e74c3c' },
+  ];
+  c.innerHTML = cols.map(col => {
+    const colTasks = tasks.filter(t => t.status === col.key);
+    return '<div class="kanban-col">' +
+      '<div class="kanban-col-header"><span style="color:' + col.color + '">' + col.label + '</span><span class="badge" style="font-size:10px">' + colTasks.length + '</span></div>' +
+      '<div class="kanban-col-body">' +
+      colTasks.map(t =>
+        '<div class="kanban-card">' +
+        '<div style="font-weight:600;margin-bottom:4px">' + escapeHTML(t.title) + '</div>' +
+        '<div style="display:flex;justify-content:space-between;color:var(--muted)"><span>P' + t.priority + '</span><span>' + t.progress + '%</span></div>' +
+        '</div>'
+      ).join('') +
+      '</div></div>';
+  }).join('');
+}
+
+function renderProjectStats(stats) {
+  const s = document.getElementById('project-stats');
+  s.innerHTML = '<div class="panel-title">Statistics</div>' +
+    '<div class="stat-card"><div class="stat-label">Total Tasks</div><div class="stat-val">' + (stats.total_tasks || 0) + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Completion</div><div class="stat-val">' + Math.round(stats.completion_rate || 0) + '%</div><div class="progress-bar" style="margin-top:4px"><div class="progress-fill" style="width:' + Math.round(stats.completion_rate || 0) + '%;background:var(--success)"></div></div></div>' +
+    '<div class="stat-card"><div class="stat-label">Running</div><div class="stat-val">' + (stats.running_tasks || 0) + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">Failed</div><div class="stat-val" style="color:var(--error)">' + (stats.failed_tasks || 0) + '</div></div>';
+}
+
+function renderProjectAgents(agents) {
+  const c = document.getElementById('project-agents-panel');
+  c.innerHTML = '<div class="panel-title">Agents</div>' +
+    agents.map(a => {
+      const dot = getStatusColor(a.status);
+      return '<div class="agent-mini"><span class="status-dot" style="background:' + dot + '"></span><span>' + escapeHTML(a.name) + '</span><span style="color:var(--muted);margin-left:auto;font-size:10px">' + a.status + '</span></div>';
+    }).join('');
+}
+
+function renderProjectSkills(skills) {
+  const c = document.getElementById('project-skills-panel');
+  c.innerHTML = '<div class="panel-title">Skills</div>' +
+    (skills.length === 0
+      ? '<div style="font-size:11px;color:var(--muted)">No skills bound</div>'
+      : skills.map(s => '<span class="skill-mini">' + escapeHTML(s.name) + '</span>').join(''));
+}
+
+function switchProjectView(view) {
+  currentProjectView = view;
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.getElementById('project-task-list').style.display = view === 'list' ? 'block' : 'none';
+  document.getElementById('project-kanban').style.display = view === 'kanban' ? 'flex' : 'none';
+}
+
+function showNewProjectModal() {
+  document.getElementById('modal-new-project').style.display = 'flex';
+  document.getElementById('np-name').focus();
+}
+
+async function createProject() {
   const data = {
-    name: document.getElementById('p-name').value.trim(),
-    git_path: document.getElementById('p-git').value.trim(),
-    branch: document.getElementById('p-branch').value.trim() || 'main'
+    name: document.getElementById('np-name').value.trim(),
+    description: document.getElementById('np-desc').value.trim(),
+    git_path: document.getElementById('np-git').value.trim(),
+    branch: document.getElementById('np-branch').value.trim() || 'main',
+    priority: parseInt(document.getElementById('np-priority').value) || 0,
+    owner: document.getElementById('np-owner').value.trim(),
   };
   if (!data.name) { toast('Name is required', 'error'); return; }
   try {
     await api('/projects', { method: 'POST', body: JSON.stringify(data) });
-    toast('Project added');
-    ['p-name', 'p-git'].forEach(id => document.getElementById(id).value = '');
+    toast('Project created');
+    document.getElementById('modal-new-project').style.display = 'none';
+    ['np-name', 'np-desc', 'np-git', 'np-owner'].forEach(id => document.getElementById(id).value = '');
     loadProjects();
   } catch (e) { toast(e.message, 'error'); }
 }
 
+function showNewTaskModal(projectId) {
+  const title = prompt('Task title:');
+  if (!title) return;
+  const desc = prompt('Description (optional):') || '';
+  const priority = parseInt(prompt('Priority (0-5):') || '0');
+  api('/tasks', { method: 'POST', body: JSON.stringify({ project_id: projectId, title: title, description: desc, priority: priority, status: 'pending' }) })
+    .then(() => { toast('Task created'); selectProject(projectId); })
+    .catch(e => toast(e.message, 'error'));
+}
+
+async function pauseProject(id) {
+  try { await api('/projects/' + id + '/pause', { method: 'POST' }); toast('Project paused'); loadProjects(); } catch (e) { toast(e.message, 'error'); }
+}
+
+async function resumeProject(id) {
+  try { await api('/projects/' + id + '/resume', { method: 'POST' }); toast('Project resumed'); loadProjects(); } catch (e) { toast(e.message, 'error'); }
+}
+
+async function toggleFavorite(id) {
+  try { await api('/projects/' + id + '/favorite', { method: 'POST' }); loadProjects(); } catch (e) { toast(e.message, 'error'); }
+}
+
 async function deleteProject(id) {
-  if (!confirm('Delete this project?')) return;
-  try { await api('/projects/' + id, { method: 'DELETE' }); toast('Project deleted'); loadProjects(); } catch (e) { toast(e.message, 'error'); }
+  if (!confirm('Delete this project and all its tasks?')) return;
+  try {
+    await api('/projects/' + id, { method: 'DELETE' });
+    toast('Project deleted');
+    if (currentProjectId === id) {
+      currentProjectId = null;
+      document.getElementById('project-empty').style.display = 'flex';
+      document.getElementById('project-detail').style.display = 'none';
+    }
+    loadProjects();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ==================== Tasks ====================

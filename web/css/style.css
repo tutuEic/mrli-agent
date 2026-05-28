@@ -424,6 +424,189 @@ select.form-input {
   flex-wrap: nowrap;
 }
 
+/* ==================== Project Panel ==================== */
+.project-panel {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.project-nav {
+  width: 260px;
+  min-width: 260px;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.project-nav-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.project-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.project-list-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.project-list-item:hover { background: var(--bg); }
+.project-list-item.active { background: var(--bg); border-left: 3px solid var(--gold); }
+.project-list-item .proj-name { font-weight: 600; font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-list-item .proj-status { font-size: 10px; padding: 2px 6px; border-radius: 10px; }
+.project-list-item .proj-fav { color: #f39c12; font-size: 14px; cursor: pointer; }
+.project-nav-footer { padding: 10px 12px; border-top: 1px solid var(--border); }
+
+.project-workspace {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  background: var(--bg);
+}
+.project-header {
+  padding: 20px 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.project-header h2 { margin: 0 0 4px; font-size: 20px; }
+.project-header .project-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.project-header .project-meta-item { display: flex; align-items: center; gap: 4px; }
+
+.project-actions {
+  padding: 12px 24px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.project-view-toggle {
+  padding: 8px 24px;
+  display: flex;
+  gap: 4px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.view-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text2);
+  transition: all 0.2s;
+}
+.view-btn.active { background: var(--gold); color: #fff; border-color: var(--gold); }
+.view-btn:hover:not(.active) { background: var(--bg); }
+
+.project-task-list { padding: 16px 24px; }
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  transition: all 0.15s;
+}
+.task-row:hover { border-color: var(--gold); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.task-row .task-title { flex: 1; font-weight: 600; font-size: 13px; }
+.task-row .task-progress { width: 80px; }
+.progress-bar { height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+.project-kanban {
+  display: flex;
+  gap: 12px;
+  padding: 16px 24px;
+  overflow-x: auto;
+  height: calc(100% - 200px);
+}
+.kanban-col {
+  min-width: 260px;
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.kanban-col-header {
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.kanban-col-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.kanban-card {
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.kanban-card:hover { border-color: var(--gold); transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+
+.project-sidebar-right {
+  width: 280px;
+  min-width: 280px;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+}
+.project-stats { margin-bottom: 16px; }
+.project-stats .stat-card { padding: 12px; margin-bottom: 8px; }
+.project-agents-panel, .project-skills-panel { margin-bottom: 16px; }
+.panel-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.5px; }
+.agent-mini { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; font-size: 12px; }
+.agent-mini:hover { background: var(--bg); }
+.skill-mini { display: inline-flex; padding: 3px 8px; border-radius: 12px; font-size: 11px; background: #e8eaf6; color: #283593; margin: 2px; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 24px;
+  width: 520px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.modal-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
 /* ==================== Agent Grid ==================== */
 .agent-grid {
   display: grid;

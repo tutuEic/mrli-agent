@@ -222,34 +222,57 @@
     </section>
 
     <!-- Projects -->
-    <section id="page-projects" class="page-section">
-      <h1 class="section-title">Projects</h1>
-      <p class="section-sub">Manage your development projects</p>
-      <div class="form">
-        <div class="form-title">Add New Project</div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Name</label>
-            <input class="form-input" id="p-name" placeholder="e.g., my-app">
+    <section id="page-projects" class="page-section" style="padding:0;height:calc(100vh - 60px);overflow:hidden">
+      <div class="project-panel">
+        <!-- Left: Project Nav -->
+        <div class="project-nav">
+          <div class="project-nav-header">
+            <input class="form-input" id="project-search" placeholder="Search projects..." oninput="filterProjects()">
+            <select class="form-input" id="project-filter" onchange="filterProjects()" style="margin-top:6px">
+              <option value="all">All Projects</option>
+              <option value="Active">Active</option>
+              <option value="Running">Running</option>
+              <option value="Completed">Completed</option>
+              <option value="Blocked">Blocked</option>
+              <option value="Draft">Draft</option>
+              <option value="favorite">Favorites</option>
+            </select>
           </div>
-          <div class="form-group">
-            <label class="form-label">Git Path</label>
-            <input class="form-input" id="p-git" placeholder="e.g., /home/user/projects/my-app">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Branch</label>
-            <input class="form-input" id="p-branch" value="main" placeholder="main">
-          </div>
-          <div style="display:flex;align-items:flex-end">
-            <button class="btn btn-primary" onclick="addProject()">Add Project</button>
+          <div class="project-list" id="project-list"></div>
+          <div class="project-nav-footer">
+            <button class="btn btn-primary" style="width:100%" onclick="showNewProjectModal()">+ New Project</button>
           </div>
         </div>
+
+        <!-- Center: Workspace -->
+        <div class="project-workspace" id="project-workspace">
+          <div id="project-empty" class="empty" style="display:flex;align-items:center;justify-content:center;height:100%">
+            <div style="text-align:center"><div style="font-size:48px;opacity:0.3">&#9674;</div><div style="margin-top:12px;font-size:14px;color:var(--muted)">Select a project from the left panel</div></div>
+          </div>
+          <div id="project-detail" style="display:none">
+            <!-- Header -->
+            <div class="project-header" id="project-header"></div>
+            <!-- Action Buttons -->
+            <div class="project-actions" id="project-actions"></div>
+            <!-- View Toggle -->
+            <div class="project-view-toggle">
+              <button class="view-btn active" data-view="list" onclick="switchProjectView('list')">&#9776; List</button>
+              <button class="view-btn" data-view="kanban" onclick="switchProjectView('kanban')">&#9638; Kanban</button>
+            </div>
+            <!-- Task List View -->
+            <div id="project-task-list" class="project-task-list"></div>
+            <!-- Kanban View -->
+            <div id="project-kanban" class="project-kanban" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- Right: Stats + Agent/Skills -->
+        <div class="project-sidebar-right">
+          <div class="project-stats" id="project-stats"></div>
+          <div class="project-agents-panel" id="project-agents-panel"></div>
+          <div class="project-skills-panel" id="project-skills-panel"></div>
+        </div>
       </div>
-      <table class="table">
-        <thead><tr><th>ID</th><th>Name</th><th>Git Path</th><th>Branch</th><th>Created</th><th>Actions</th></tr></thead>
-        <tbody id="projects-body"></tbody>
-      </table>
-      <div id="projects-empty" class="empty" style="display:none">No projects configured yet.</div>
     </section>
 
     <!-- Tasks -->
@@ -367,6 +390,27 @@
       <div id="tokens-empty" class="empty" style="display:none">No token usage recorded yet.</div>
     </section>
 
+  </div>
+</div>
+
+<!-- New Project Modal -->
+<div class="modal-overlay" id="modal-new-project" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal">
+    <div class="modal-title">Create New Project</div>
+    <div class="form-row"><div class="form-group" style="flex:1"><label class="form-label">Name</label><input class="form-input" id="np-name" placeholder="Project name"></div></div>
+    <div class="form-row"><div class="form-group" style="flex:1"><label class="form-label">Description</label><textarea class="form-input" id="np-desc" rows="2" placeholder="What is this project about?"></textarea></div></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Git Path</label><input class="form-input" id="np-git" placeholder="/path/to/repo"></div>
+      <div class="form-group"><label class="form-label">Branch</label><input class="form-input" id="np-branch" value="main"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Priority (0-5)</label><input class="form-input" id="np-priority" type="number" value="0" min="0" max="5"></div>
+      <div class="form-group"><label class="form-label">Owner</label><input class="form-input" id="np-owner" placeholder="e.g., Scheduler"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="document.getElementById('modal-new-project').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" onclick="createProject()">Create</button>
+    </div>
   </div>
 </div>
 
