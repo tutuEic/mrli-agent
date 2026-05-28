@@ -12,6 +12,7 @@ import (
 
 	"mrli-agent/internal/agentctl"
 	"mrli-agent/internal/db"
+	"mrli-agent/internal/dispatch"
 	"mrli-agent/internal/events"
 
 	"github.com/gorilla/websocket"
@@ -19,14 +20,20 @@ import (
 
 // Server holds the HTTP handlers and dependencies.
 type Server struct {
-	db      *db.DB
-	hub     *events.Hub
-	checker *agentctl.Checker
+	db         *db.DB
+	hub        *events.Hub
+	checker    *agentctl.Checker
+	dispatcher *dispatch.Dispatcher
 }
 
 // NewServer creates a new API server.
 func NewServer(db *db.DB, hub *events.Hub) *Server {
-	return &Server{db: db, hub: hub, checker: agentctl.NewChecker(db, hub)}
+	return &Server{
+		db:         db,
+		hub:        hub,
+		checker:    agentctl.NewChecker(db, hub),
+		dispatcher: dispatch.New(db),
+	}
 }
 
 // Handler returns the main HTTP handler with all routes.
@@ -757,17 +764,29 @@ func (s *Server) sendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Actually call the agent to get a response
-	// For now, return a placeholder response
+	// Get recent chat history for context
+	history, _ := s.db.ListChatMessages(agentID, 20)
+
+	// Call agent via dispatcher
+	reply, err := s.dispatcher.Send(agent, body.Content, history)
+	if err != nil {
+		log.Printf("[chat] Agent dispatch error: %v", err)
+		reply = fmt.Sprintf("[%s] Error: %s", agent.Name, err.Error())
+	}
+
+	// Save assistant response
 	assistantMsg := &db.ChatMessage{
 		AgentID: agentID,
 		Role:    "assistant",
-		Content: fmt.Sprintf("[%s] Received: %s (agent integration pending)", agent.Name, body.Content),
+		Content: reply,
 	}
 	if err := s.db.CreateChatMessage(assistantMsg); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Broadcast via WebSocket
+	s.hub.Broadcast("chat.message", assistantMsg)
 
 	writeJSON(w, http.StatusCreated, assistantMsg)
 }

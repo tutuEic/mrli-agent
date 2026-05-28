@@ -850,14 +850,36 @@ async function loadChat() {
 async function sendChat() {
   const agentID = document.getElementById('chat-agent').value;
   const input = document.getElementById('chat-input');
+  const btn = document.querySelector('#page-chat .btn-primary');
   const content = input.value.trim();
   if (!agentID) { toast('Select an agent', 'error'); return; }
   if (!content) return;
+
+  // Show user message immediately
+  const container = document.getElementById('chat-messages');
+  container.innerHTML += '<div class="chat-msg user"><div class="chat-bubble">' + escapeHTML(content) + '</div></div>';
+  container.scrollTop = container.scrollHeight;
+
+  // Show loading indicator
+  container.innerHTML += '<div id="chat-loading" class="chat-msg assistant"><div class="chat-bubble" style="opacity:0.6"><em>Thinking...</em></div></div>';
+  container.scrollTop = container.scrollHeight;
+
+  input.value = '';
+  btn.disabled = true;
+  btn.textContent = 'Waiting...';
+
   try {
     await api('/chat/' + agentID, { method: 'POST', body: JSON.stringify({ content }) });
-    input.value = '';
     loadChat();
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) {
+    // Remove loading indicator on error
+    const loading = document.getElementById('chat-loading');
+    if (loading) loading.remove();
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
 }
 
 async function clearChat() {
