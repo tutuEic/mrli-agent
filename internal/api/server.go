@@ -36,6 +36,16 @@ func NewServer(db *db.DB, hub *events.Hub) *Server {
 	}
 }
 
+// NewServerWithDispatch creates a new API server with dispatch config.
+func NewServerWithDispatch(db *db.DB, hub *events.Hub, dispatchCfg dispatch.Config) *Server {
+	return &Server{
+		db:         db,
+		hub:        hub,
+		checker:    agentctl.NewChecker(db, hub),
+		dispatcher: dispatch.NewWithConfig(db, dispatchCfg),
+	}
+}
+
 // Handler returns the main HTTP handler with all routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -1478,6 +1488,13 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // Start starts the HTTP server.
 func Start(addr string, db *db.DB, hub *events.Hub) error {
 	srv := NewServer(db, hub)
+	log.Printf("[api] Server listening on %s", addr)
+	return fmt.Errorf("server stopped: %w", http.ListenAndServe(addr, srv.Handler()))
+}
+
+// StartWithDispatch starts the HTTP server with dispatch config.
+func StartWithDispatch(addr string, db *db.DB, hub *events.Hub, dispatchCfg dispatch.Config) error {
+	srv := NewServerWithDispatch(db, hub, dispatchCfg)
 	log.Printf("[api] Server listening on %s", addr)
 	return fmt.Errorf("server stopped: %w", http.ListenAndServe(addr, srv.Handler()))
 }

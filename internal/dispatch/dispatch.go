@@ -2,6 +2,7 @@
 package dispatch
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,19 +17,33 @@ import (
 	"mrli-agent/internal/db"
 )
 
+// Config holds dispatch configuration.
+type Config struct {
+	OpenClawToken string // Bearer token for OpenClaw API
+}
+
 // Dispatcher sends messages to agents and returns responses.
 type Dispatcher struct {
 	db     *db.DB
 	client *http.Client
+	config Config
 }
 
 // New creates a new Dispatcher.
 func New(database *db.DB) *Dispatcher {
 	return &Dispatcher{
-		db: database,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		db:     database,
+		client: &http.Client{Timeout: 120 * time.Second},
+		config: Config{},
+	}
+}
+
+// NewWithConfig creates a new Dispatcher with configuration.
+func NewWithConfig(database *db.DB, cfg Config) *Dispatcher {
+	return &Dispatcher{
+		db:     database,
+		client: &http.Client{Timeout: 120 * time.Second},
+		config: cfg,
 	}
 }
 
@@ -36,13 +51,13 @@ func New(database *db.DB) *Dispatcher {
 func (d *Dispatcher) Send(agent *db.Agent, userMessage string, history []db.ChatMessage) (string, error) {
 	switch agent.Type {
 	case "openclaw":
-		return d.sendHTTP(agent, userMessage, history)
+		return d.sendOpenAI(agent, userMessage, history)
 	case "hermes":
 		// Hermes is CLI-based, use hermes -z "prompt"
 		return d.sendCLI(agent, "hermes -z "+shellQuote(userMessage))
 	case "custom":
 		if agent.Endpoint != "" {
-			return d.sendHTTP(agent, userMessage, history)
+			return d.sendOpenAI(agent, userMessage, history)
 		}
 		if agent.BinaryPath != "" {
 			return d.sendCLI(agent, userMessage)
@@ -53,26 +68,20 @@ func (d *Dispatcher) Send(agent *db.Agent, userMessage string, history []db.Chat
 	case "codex":
 		return d.sendCLI(agent, "codex -q "+shellQuote(userMessage))
 	default:
-		// Try HTTP first, fall back to CLI
+		// Try OpenAI compatible API first, fall back to CLI
 		if agent.Endpoint != "" {
-			return d.sendHTTP(agent, userMessage, history)
+			return d.sendOpenAI(agent, userMessage, history)
 		}
 		return "", fmt.Errorf("unsupported agent type: %s", agent.Type)
 	}
 }
 
-// sendHTTP sends a message via HTTP to the agent's endpoint.
-func (d *Dispatcher) sendHTTP(agent *db.Agent, userMessage string, history []db.ChatMessage) (string, error) {
+// sendOpenAI sends a message via OpenAI-compatible API (used by OpenClaw and custom agents).
+func (d *Dispatcher) sendOpenAI(agent *db.Agent, userMessage string, history []db.ChatMessage) (string, error) {
 	endpoint := strings.TrimRight(agent.Endpoint, "/")
-	log.Printf("[dispatch] Sending to %s (type=%s) at %s", agent.Name, agent.Type, endpoint)
+	log.Printf("[dispatch] Sending to %s (type=%s) via OpenAI API at %s", agent.Name, agent.Type, endpoint)
 
-	// Try OpenClaw-compatible chat API: POST /api/chat
-	payload := map[string]any{
-		"message": userMessage,
-		"agent":   agent.Name,
-	}
-
-	// Build conversation history for context
+	// Build messages array with history
 	var messages []map[string]string
 	for _, m := range history {
 		messages = append(messages, map[string]string{
@@ -80,140 +89,136 @@ func (d *Dispatcher) sendHTTP(agent *db.Agent, userMessage string, history []db.
 			"content": m.Content,
 		})
 	}
-	payload["messages"] = messages
+	// Add current user message
+	messages = append(messages, map[string]string{
+		"role":    "user",
+		"content": userMessage,
+	})
+
+	// Build OpenAI-compatible request
+	payload := map[string]any{
+		"model":    "openclaw/default",
+		"messages": messages,
+		"stream":   false,
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 
-	// Try multiple endpoint patterns
-	endpoints := []string{
-		endpoint + "/api/chat",
-		endpoint + "/v1/chat/completions",
-		endpoint + "/chat",
-		endpoint + "/api/agent",
+	// Try OpenAI-compatible endpoint
+	url := endpoint + "/v1/chat/completions"
+	log.Printf("[dispatch] POST %s", url)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add auth token if configured
+	if d.config.OpenClawToken != "" {
+		req.Header.Set("Authorization", "Bearer "+d.config.OpenClawToken)
+		log.Printf("[dispatch] Added Authorization header")
 	}
 
-	for _, url := range endpoints {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
 
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-		if err != nil {
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		log.Printf("[dispatch] Trying endpoint: %s", url)
-		resp, err := d.client.Do(req)
-		if err != nil {
-			log.Printf("[dispatch] %s failed: %v", url, err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		respBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			continue
-		}
-
-		log.Printf("[dispatch] %s returned %d: %s", url, resp.StatusCode, truncate(string(respBody), 200))
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			// Try to extract reply from various response formats
-			reply := extractReply(respBody)
-			if reply != "" {
-				return reply, nil
-			}
-		}
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
 	}
 
-	// If all HTTP attempts fail, try a simple health check to see if agent is reachable
-	if err := d.pingAgent(agent); err != nil {
-		return "", fmt.Errorf("agent %s unreachable: %w", agent.Name, err)
+	log.Printf("[dispatch] Response %d: %s", resp.StatusCode, truncate(string(respBody), 300))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
 
-	return fmt.Sprintf("[%s] I received your message but couldn't generate a response. The agent may not support chat via this endpoint.", agent.Name), nil
+	// Parse OpenAI response format
+	reply := extractOpenAIReply(respBody)
+	if reply == "" {
+		return "", fmt.Errorf("no reply extracted from response")
+	}
+
+	return reply, nil
 }
 
 // sendCLI sends a message via CLI command execution.
 func (d *Dispatcher) sendCLI(agent *db.Agent, command string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	log.Printf("[dispatch] CLI: %s", command)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("cli error: %w, output: %s", err, truncate(string(out), 200))
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start command: %w", err)
 	}
 
-	reply := strings.TrimSpace(string(out))
+	// Read stdout
+	var outBuf strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		outBuf.WriteString(scanner.Text() + "\n")
+	}
+
+	// Read stderr
+	var errBuf strings.Builder
+	errScanner := bufio.NewScanner(stderr)
+	for errScanner.Scan() {
+		errBuf.WriteString(errScanner.Text() + "\n")
+	}
+
+	err := cmd.Wait()
+	if err != nil {
+		return "", fmt.Errorf("cli error: %w, stderr: %s", err, truncate(errBuf.String(), 200))
+	}
+
+	reply := strings.TrimSpace(outBuf.String())
 	if reply == "" {
 		return fmt.Sprintf("[%s] Command executed but returned no output.", agent.Name), nil
 	}
 	return reply, nil
 }
 
-// pingAgent checks if an agent is reachable.
-func (d *Dispatcher) pingAgent(agent *db.Agent) error {
-	if agent.Endpoint == "" {
-		return fmt.Errorf("no endpoint")
-	}
-
-	endpoint := strings.TrimRight(agent.Endpoint, "/")
-	for _, path := range []string{"/health", "/"} {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		req, err := http.NewRequestWithContext(ctx, "GET", endpoint+path, nil)
-		if err != nil {
-			cancel()
-			continue
-		}
-		resp, err := d.client.Do(req)
-		cancel()
-		if err != nil {
-			continue
-		}
-		resp.Body.Close()
-		if resp.StatusCode < 500 {
-			return nil
-		}
-	}
-	return fmt.Errorf("all health checks failed")
-}
-
-// extractReply tries to extract a reply string from various JSON response formats.
-func extractReply(data []byte) string {
-	// Try OpenAI-style: {"choices":[{"message":{"content":"..."}}]}
-	var openai struct {
+// extractOpenAIReply extracts reply from OpenAI Chat Completions response format.
+func extractOpenAIReply(data []byte) string {
+	var resp struct {
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
-	}
-	if err := json.Unmarshal(data, &openai); err == nil && len(openai.Choices) > 0 {
-		if c := openai.Choices[0].Message.Content; c != "" {
-			return c
-		}
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 
-	// Try {"reply":"..."} or {"message":"..."} or {"content":"..."} or {"response":"..."}
-	var simple map[string]any
-	if err := json.Unmarshal(data, &simple); err == nil {
-		for _, key := range []string{"reply", "message", "content", "response", "text", "output", "result"} {
-			if v, ok := simple[key]; ok {
-				if s, ok := v.(string); ok && s != "" {
-					return s
-				}
-			}
-		}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		log.Printf("[dispatch] JSON parse error: %v", err)
+		// Try plain text
+		return strings.TrimSpace(string(data))
 	}
 
-	// Try plain text
-	s := strings.TrimSpace(string(data))
-	if s != "" && !strings.HasPrefix(s, "{") && !strings.HasPrefix(s, "[") {
-		return s
+	// Check for error
+	if resp.Error.Message != "" {
+		log.Printf("[dispatch] API error: %s", resp.Error.Message)
+		return ""
+	}
+
+	if len(resp.Choices) > 0 {
+		return strings.TrimSpace(resp.Choices[0].Message.Content)
 	}
 
 	return ""
