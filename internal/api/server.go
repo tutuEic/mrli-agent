@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"mrli-agent/internal/agentctl"
 	"mrli-agent/internal/db"
 	"mrli-agent/internal/events"
 
@@ -17,13 +19,14 @@ import (
 
 // Server holds the HTTP handlers and dependencies.
 type Server struct {
-	db  *db.DB
-	hub *events.Hub
+	db      *db.DB
+	hub     *events.Hub
+	checker *agentctl.Checker
 }
 
 // NewServer creates a new API server.
 func NewServer(db *db.DB, hub *events.Hub) *Server {
-	return &Server{db: db, hub: hub}
+	return &Server{db: db, hub: hub, checker: agentctl.NewChecker(db, hub)}
 }
 
 // Handler returns the main HTTP handler with all routes.
@@ -91,12 +94,36 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/roles/{id}", s.updateRole)
 	mux.HandleFunc("DELETE /api/roles/{id}", s.deleteRole)
 
+	// Agent Lifecycle
+	mux.HandleFunc("POST /api/agents/{id}/wake", s.wakeAgent)
+	mux.HandleFunc("POST /api/agents/{id}/restart", s.restartAgent)
+	mux.HandleFunc("POST /api/agents/{id}/stop", s.stopAgent)
+	mux.HandleFunc("POST /api/agents/{id}/ping", s.pingAgent)
+
 	// Agent-Role binding
 	mux.HandleFunc("POST /api/agents/{id}/role", s.assignRole)
 	mux.HandleFunc("DELETE /api/agents/{id}/role", s.unassignRole)
 
 	// Agent Status
 	mux.HandleFunc("PATCH /api/agents/{id}/status", s.updateAgentStatus)
+
+	// Skills CRUD
+	mux.HandleFunc("GET /api/skills", s.listSkills)
+	mux.HandleFunc("POST /api/skills", s.createSkill)
+	mux.HandleFunc("GET /api/skills/stats", s.getSkillsStats)
+	mux.HandleFunc("GET /api/skills/{id}", s.getSkill)
+	mux.HandleFunc("PUT /api/skills/{id}", s.updateSkill)
+	mux.HandleFunc("DELETE /api/skills/{id}", s.deleteSkill)
+
+	// Role-Skill binding
+	mux.HandleFunc("GET /api/roles/{id}/skills", s.listRoleSkills)
+	mux.HandleFunc("POST /api/roles/{id}/skills", s.bindRoleSkill)
+	mux.HandleFunc("DELETE /api/roles/{id}/skills/{skill_id}", s.unbindRoleSkill)
+
+	// Agent-Skill binding
+	mux.HandleFunc("GET /api/agents/{id}/skills", s.listAgentSkills)
+	mux.HandleFunc("POST /api/agents/{id}/skills", s.bindAgentSkill)
+	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skill_id}", s.unbindAgentSkill)
 
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.Dir("web")))
@@ -967,6 +994,285 @@ func (s *Server) updateAgentStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// === Agent Lifecycle Handlers ===
+
+func (s *Server) wakeAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	agent, err := s.db.GetAgent(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err := s.checker.Wake(agent); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a, _ := s.db.GetAgent(id)
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "status": a.Status})
+}
+
+func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	agent, err := s.db.GetAgent(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err := s.checker.Restart(agent); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a, _ := s.db.GetAgent(id)
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "status": a.Status})
+}
+
+func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	agent, err := s.db.GetAgent(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err := s.checker.Stop(agent); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "status": "offline"})
+}
+
+func (s *Server) pingAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	agent, err := s.db.GetAgent(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	result, err := s.checker.Ping(agent)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a, _ := s.db.GetAgent(id)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":    result.Healthy,
+		"status":     a.Status,
+		"message":    result.Message,
+		"latency_ms": result.Latency,
+	})
+}
+
+// === Skills Handlers ===
+
+func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
+	skills, err := s.db.ListSkills()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, skills)
+}
+
+func (s *Server) createSkill(w http.ResponseWriter, r *http.Request) {
+	var sk db.Skill
+	if err := json.NewDecoder(r.Body).Decode(&sk); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if sk.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if sk.UUID == "" {
+		sk.UUID = fmt.Sprintf("skill-%d", time.Now().UnixNano())
+	}
+	sk.Enabled = true
+
+	if err := s.db.CreateSkill(&sk); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, sk)
+}
+
+func (s *Server) getSkill(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	sk, err := s.db.GetSkill(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, sk)
+}
+
+func (s *Server) updateSkill(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var sk db.Skill
+	if err := json.NewDecoder(r.Body).Decode(&sk); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	sk.ID = id
+	if err := s.db.UpdateSkill(&sk); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, sk)
+}
+
+func (s *Server) deleteSkill(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.db.DeleteSkill(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) getSkillsStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.db.GetSkillsStats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// === Role-Skill Handlers ===
+
+func (s *Server) listRoleSkills(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	skills, err := s.db.ListRoleSkills(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, skills)
+}
+
+func (s *Server) bindRoleSkill(w http.ResponseWriter, r *http.Request) {
+	roleID, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid role id")
+		return
+	}
+	var body struct {
+		SkillID int64 `json:"skill_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := s.db.BindRoleSkill(roleID, body.SkillID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "bound"})
+}
+
+func (s *Server) unbindRoleSkill(w http.ResponseWriter, r *http.Request) {
+	roleID, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid role id")
+		return
+	}
+	skillID, err := parseID(r.PathValue("skill_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid skill id")
+		return
+	}
+	if err := s.db.UnbindRoleSkill(roleID, skillID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unbound"})
+}
+
+// === Agent-Skill Handlers ===
+
+func (s *Server) listAgentSkills(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	skills, err := s.db.ListAgentSkills(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, skills)
+}
+
+func (s *Server) bindAgentSkill(w http.ResponseWriter, r *http.Request) {
+	agentID, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid agent id")
+		return
+	}
+	var body struct {
+		SkillID int64 `json:"skill_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := s.db.BindAgentSkill(agentID, body.SkillID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "bound"})
+}
+
+func (s *Server) unbindAgentSkill(w http.ResponseWriter, r *http.Request) {
+	agentID, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid agent id")
+		return
+	}
+	skillID, err := parseID(r.PathValue("skill_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid skill id")
+		return
+	}
+	if err := s.db.UnbindAgentSkill(agentID, skillID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unbound"})
 }
 
 // === Helpers ===

@@ -1,22 +1,26 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
 
 // Agent represents a configured AI agent.
 type Agent struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	Type       string    `json:"type"`        // hermes, claude-code, codex, openclaw, custom
-	Endpoint   string    `json:"endpoint"`    // API endpoint URL
-	BinaryPath string    `json:"binary_path"` // CLI binary path
-	Args       string    `json:"args"`        // JSON-encoded extra args
-	Status     string    `json:"status"`      // online, offline, busy
-	Enabled    bool      `json:"enabled"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	Type         string     `json:"type"`         // hermes, claude-code, codex, openclaw, custom
+	Endpoint     string     `json:"endpoint"`     // API endpoint URL
+	BinaryPath   string     `json:"binary_path"`  // CLI binary path
+	Args         string     `json:"args"`         // JSON-encoded extra args
+	Status       string     `json:"status"`       // online, offline, busy, starting, stopping, recovering, unhealthy
+	Enabled      bool       `json:"enabled"`
+	LastSeen     *time.Time `json:"last_seen"`
+	HealthInfo   string     `json:"health_info"`
+	RecoverCount int        `json:"recover_count"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // CreateAgent inserts a new agent and returns its ID.
@@ -44,7 +48,8 @@ func (db *DB) CreateAgent(a *Agent) error {
 // ListAgents returns all agents ordered by ID.
 func (db *DB) ListAgents() ([]Agent, error) {
 	rows, err := db.Conn.Query(
-		`SELECT id, name, type, endpoint, binary_path, args, status, enabled, created_at, updated_at
+		`SELECT id, name, type, endpoint, binary_path, args, status, enabled,
+		        last_seen, health_info, recover_count, created_at, updated_at
 		 FROM agents ORDER BY id`,
 	)
 	if err != nil {
@@ -56,10 +61,15 @@ func (db *DB) ListAgents() ([]Agent, error) {
 	for rows.Next() {
 		var a Agent
 		var enabled int
-		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Endpoint, &a.BinaryPath, &a.Args, &a.Status, &enabled, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		var lastSeen sql.NullTime
+		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Endpoint, &a.BinaryPath, &a.Args, &a.Status, &enabled,
+			&lastSeen, &a.HealthInfo, &a.RecoverCount, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)
 		}
 		a.Enabled = enabled == 1
+		if lastSeen.Valid {
+			a.LastSeen = &lastSeen.Time
+		}
 		agents = append(agents, a)
 	}
 	return agents, rows.Err()
@@ -69,14 +79,20 @@ func (db *DB) ListAgents() ([]Agent, error) {
 func (db *DB) GetAgent(id int64) (*Agent, error) {
 	var a Agent
 	var enabled int
+	var lastSeen sql.NullTime
 	err := db.Conn.QueryRow(
-		`SELECT id, name, type, endpoint, binary_path, args, status, enabled, created_at, updated_at
+		`SELECT id, name, type, endpoint, binary_path, args, status, enabled,
+		        last_seen, health_info, recover_count, created_at, updated_at
 		 FROM agents WHERE id = ?`, id,
-	).Scan(&a.ID, &a.Name, &a.Type, &a.Endpoint, &a.BinaryPath, &a.Args, &a.Status, &enabled, &a.CreatedAt, &a.UpdatedAt)
+	).Scan(&a.ID, &a.Name, &a.Type, &a.Endpoint, &a.BinaryPath, &a.Args, &a.Status, &enabled,
+		&lastSeen, &a.HealthInfo, &a.RecoverCount, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get agent %d: %w", id, err)
 	}
 	a.Enabled = enabled == 1
+	if lastSeen.Valid {
+		a.LastSeen = &lastSeen.Time
+	}
 	return &a, nil
 }
 
@@ -135,4 +151,22 @@ func (db *DB) DeleteAgent(id int64) error {
 		return fmt.Errorf("agent %d not found", id)
 	}
 	return nil
+}
+
+// UpdateAgentLastSeen sets the last_seen timestamp to now.
+func (db *DB) UpdateAgentLastSeen(id int64) error {
+	_, err := db.Conn.Exec(`UPDATE agents SET last_seen=?, updated_at=? WHERE id=?`, Now(), Now(), id)
+	return err
+}
+
+// UpdateAgentHealth sets the health_info field.
+func (db *DB) UpdateAgentHealth(id int64, info string) error {
+	_, err := db.Conn.Exec(`UPDATE agents SET health_info=?, updated_at=? WHERE id=?`, info, Now(), id)
+	return err
+}
+
+// IncrementRecoverCount increments recover_count by 1.
+func (db *DB) IncrementRecoverCount(id int64) error {
+	_, err := db.Conn.Exec(`UPDATE agents SET recover_count=recover_count+1, updated_at=? WHERE id=?`, Now(), id)
+	return err
 }

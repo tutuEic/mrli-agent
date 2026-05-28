@@ -48,6 +48,7 @@ function showPage(page) {
     case 'dashboard': loadDashboard(); break;
     case 'roles': loadRoles(); break;
     case 'agents': loadAgents(); loadRoleOptions(); break;
+    case 'skills': loadSkills(); break;
     case 'projects': loadProjects(); break;
     case 'tasks': loadTasks(); break;
     case 'keys': loadAPIKeys(); break;
@@ -72,6 +73,8 @@ async function loadDashboard() {
       { label: 'Projects', val: stats.project_count, sub: 'Total' },
       { label: 'API Keys', val: stats.api_key_count, sub: 'Configured' },
       { label: 'Tasks', val: stats.task_count, sub: stats.done_count + ' done' },
+      { label: 'Skills', val: stats.skill_count || 0, sub: (stats.skill_uses || 0) + ' uses' },
+      { label: 'Recoveries', val: stats.recover_count || 0, sub: 'Auto-healed' },
     ].map(s =>
       '<div class="stat-card">' +
       '<div class="stat-label">' + s.label + '</div>' +
@@ -115,18 +118,27 @@ async function loadAgents() {
 
     tbody.innerHTML = agents.map(a => {
       const roleName = a.role_name || (a.role_id ? roleMap[a.role_id] : null) || '-';
+      const lastSeen = a.last_seen ? new Date(a.last_seen).toLocaleString() : '-';
+      const statusDot = getStatusColor(a.status);
       return '<tr><td>' + a.id + '</td>' +
       '<td><strong>' + a.name + '</strong></td>' +
       '<td>' + a.type + '</td>' +
       '<td>' + roleName + '</td>' +
       '<td class="mono">' + (a.endpoint || '-') + '</td>' +
-      '<td><span class="badge badge-' + a.status + '">' + a.status + '</span></td>' +
-      '<td>' +
-      '<select class="form-input" style="width:120px;display:inline-block;font-size:11px;padding:4px 8px" onchange="assignRole(' + a.id + ',this.value)">' +
+      '<td><span class="status-dot" style="background:' + statusDot + '"></span>' +
+      ' <span class="badge badge-' + a.status + '">' + a.status + '</span></td>' +
+      '<td style="font-size:11px">' + lastSeen + '</td>' +
+      '<td>' + (a.recover_count || 0) + '</td>' +
+      '<td class="actions-cell">' +
+      '<select class="form-input" style="width:110px;display:inline-block;font-size:11px;padding:3px 6px" onchange="assignRole(' + a.id + ',this.value)">' +
       '<option value="">-- No Role --</option>' +
       roles.map(r => '<option value="' + r.id + '"' + (a.role_id == r.id ? ' selected' : '') + '>' + r.name + '</option>').join('') +
       '</select> ' +
-      '<button class="btn btn-danger btn-sm" onclick="deleteAgent(' + a.id + ')">Delete</button></td></tr>';
+      '<button class="btn btn-sm btn-lifecycle" onclick="agentPing(' + a.id + ')" title="Ping">📡</button> ' +
+      '<button class="btn btn-sm btn-lifecycle btn-wake" onclick="agentWake(' + a.id + ')" title="Wake">⚡</button> ' +
+      '<button class="btn btn-sm btn-lifecycle btn-restart" onclick="agentRestart(' + a.id + ')" title="Restart">🔄</button> ' +
+      '<button class="btn btn-sm btn-lifecycle btn-stop" onclick="agentStop(' + a.id + ')" title="Stop">⏹</button> ' +
+      '<button class="btn btn-danger btn-sm" onclick="deleteAgent(' + a.id + ')">✕</button></td></tr>';
     }).join('');
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -165,6 +177,124 @@ async function addAgent() {
 async function deleteAgent(id) {
   if (!confirm('Delete this agent?')) return;
   try { await api('/agents/' + id, { method: 'DELETE' }); toast('Agent deleted'); loadAgents(); } catch (e) { toast(e.message, 'error'); }
+}
+
+// ==================== Agent Lifecycle ====================
+function getStatusColor(status) {
+  switch (status) {
+    case 'online': return '#27ae60';
+    case 'busy': return '#f39c12';
+    case 'starting':
+    case 'stopping':
+    case 'recovering': return '#3498db';
+    case 'unhealthy': return '#e74c3c';
+    case 'offline':
+    default: return '#95a5a6';
+  }
+}
+
+async function agentPing(id) {
+  try {
+    const r = await api('/agents/' + id + '/ping', { method: 'POST' });
+    toast('Ping: ' + (r.success ? 'OK' : 'FAIL') + ' (' + (r.latency_ms||0) + 'ms) — ' + (r.message||''));
+    loadAgents();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function agentWake(id) {
+  try {
+    const r = await api('/agents/' + id + '/wake', { method: 'POST' });
+    toast('Wake: ' + (r.success ? 'OK' : 'failed') + ' — status: ' + r.status);
+    loadAgents();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function agentRestart(id) {
+  if (!confirm('Restart this agent?')) return;
+  try {
+    const r = await api('/agents/' + id + '/restart', { method: 'POST' });
+    toast('Restart: ' + (r.success ? 'OK' : 'failed') + ' — status: ' + r.status);
+    loadAgents();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function agentStop(id) {
+  if (!confirm('Stop this agent?')) return;
+  try {
+    const r = await api('/agents/' + id + '/stop', { method: 'POST' });
+    toast('Stop: ' + (r.success ? 'OK' : 'failed'));
+    loadAgents();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ==================== Skills ====================
+async function loadSkills() {
+  try {
+    const skills = (await api('/skills')) || [];
+    const tbody = document.getElementById('skills-body');
+    const empty = document.getElementById('skills-empty');
+
+    // Load stats
+    try {
+      const stats = await api('/skills/stats');
+      document.getElementById('skills-stats').innerHTML = [
+        { label: 'Total Skills', val: stats.total || 0, sub: (stats.enabled || 0) + ' enabled' },
+        { label: 'Total Uses', val: stats.total_uses || 0, sub: stats.most_used ? 'Top: ' + stats.most_used : '-' },
+      ].map(s =>
+        '<div class="stat-card">' +
+        '<div class="stat-label">' + s.label + '</div>' +
+        '<div class="stat-val">' + s.val + '</div>' +
+        '<div class="stat-sub">' + s.sub + '</div>' +
+        '</div>'
+      ).join('');
+    } catch (e) {}
+
+    if (skills.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+
+    tbody.innerHTML = skills.map(s =>
+      '<tr><td>' + s.id + '</td>' +
+      '<td><strong>' + escapeHTML(s.name) + '</strong></td>' +
+      '<td><span class="badge badge-info">' + escapeHTML(s.category) + '</span></td>' +
+      '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(s.description) + '</td>' +
+      '<td>' + (s.use_count || 0) + '</td>' +
+      '<td>' + (s.enabled ? '<span class="badge badge-online">enabled</span>' : '<span class="badge badge-offline">disabled</span>') + '</td>' +
+      '<td>' +
+      '<button class="btn btn-sm btn-secondary" onclick="toggleSkill(' + s.id + ',' + !s.enabled + ')">' + (s.enabled ? 'Disable' : 'Enable') + '</button> ' +
+      '<button class="btn btn-danger btn-sm" onclick="deleteSkill(' + s.id + ')">Delete</button></td></tr>'
+    ).join('');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function addSkill() {
+  const data = {
+    name: document.getElementById('sk-name').value.trim(),
+    category: document.getElementById('sk-category').value,
+    description: document.getElementById('sk-desc').value.trim(),
+    content: document.getElementById('sk-content').value.trim(),
+  };
+  if (!data.name) { toast('Name is required', 'error'); return; }
+  try {
+    await api('/skills', { method: 'POST', body: JSON.stringify(data) });
+    toast('Skill created');
+    ['sk-name', 'sk-desc', 'sk-content'].forEach(id => document.getElementById(id).value = '');
+    loadSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteSkill(id) {
+  if (!confirm('Delete this skill?')) return;
+  try { await api('/skills/' + id, { method: 'DELETE' }); toast('Skill deleted'); loadSkills(); } catch (e) { toast(e.message, 'error'); }
+}
+
+async function toggleSkill(id, enabled) {
+  try {
+    const skill = await api('/skills/' + id);
+    skill.enabled = enabled;
+    await api('/skills/' + id, { method: 'PUT', body: JSON.stringify(skill) });
+    toast('Skill ' + (enabled ? 'enabled' : 'disabled'));
+    loadSkills();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ==================== Projects ====================

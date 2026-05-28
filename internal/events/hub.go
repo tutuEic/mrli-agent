@@ -114,12 +114,16 @@ func (h *Hub) ClientCount() int {
 
 // Event type constants.
 const (
-	EventAgentStatus    = "agent.status"
-	EventTaskCreated    = "task.created"
-	EventTaskUpdated    = "task.updated"
-	EventTaskLog        = "task.log"
+	EventAgentStatus     = "agent.status"
+	EventAgentWakeup     = "agent.wakeup"
+	EventAgentRestart    = "agent.restart"
+	EventAgentHealth     = "agent.health"
+	EventAgentRecovered  = "agent.recovered"
+	EventTaskCreated     = "task.created"
+	EventTaskUpdated     = "task.updated"
+	EventTaskLog         = "task.log"
 	EventDashboardUpdate = "dashboard.updated"
-	EventChatMessage    = "chat.message"
+	EventChatMessage     = "chat.message"
 )
 
 // Timestamp returns the current time formatted for events.

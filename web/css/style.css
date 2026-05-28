@@ -381,6 +381,48 @@ select.form-input {
 .badge-online { background: #e8f5e9; color: var(--success); }
 .badge-offline { background: #f5f5f5; color: var(--muted); }
 .badge-busy { background: #fef3e2; color: var(--gold); }
+.badge-starting { background: #e3f2fd; color: #1976d2; }
+.badge-stopping { background: #e3f2fd; color: #1976d2; }
+.badge-recovering { background: #e3f2fd; color: #1976d2; }
+.badge-unhealthy { background: #fce4ec; color: #c62828; }
+.badge-info { background: #e8eaf6; color: #283593; }
+
+/* Status dot */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* Lifecycle buttons */
+.btn-lifecycle {
+  padding: 3px 6px !important;
+  font-size: 13px !important;
+  min-width: 28px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.btn-lifecycle:hover { background: var(--bg); transform: scale(1.1); }
+.btn-wake { color: #f39c12; }
+.btn-wake:hover { background: #fef3e2; }
+.btn-restart { color: #3498db; }
+.btn-restart:hover { background: #e3f2fd; }
+.btn-stop { color: #e74c3c; }
+.btn-stop:hover { background: #fce4ec; }
+
+.actions-cell {
+  white-space: nowrap;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
 
 /* ==================== Agent Grid ==================== */
 .agent-grid {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -168,8 +169,53 @@ func (db *DB) migrate() error {
 		}
 	}
 
+	// Incremental migrations (add columns/tables to existing DB)
+	incrementalMigrations := []string{
+		`ALTER TABLE agents ADD COLUMN last_seen DATETIME`,
+		`ALTER TABLE agents ADD COLUMN health_info TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN recover_count INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE IF NOT EXISTS skills (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			uuid TEXT NOT NULL UNIQUE,
+			name TEXT NOT NULL UNIQUE,
+			category TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			use_count INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS role_skills (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			role_id INTEGER NOT NULL,
+			skill_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+			FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+			UNIQUE(role_id, skill_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS agent_skills (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			agent_id INTEGER NOT NULL,
+			skill_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+			FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+			UNIQUE(agent_id, skill_id)
+		)`,
+	}
+	for _, q := range incrementalMigrations {
+		if _, err := db.Conn.Exec(q); err != nil {
+			// ALTER TABLE on existing column returns "duplicate column" — ignore
+			if !strings.Contains(err.Error(), "duplicate column") {
+				log.Printf("[db] migration skip: %v", err)
+			}
+		}
+	}
+
 	// Verify tables exist
-	for _, table := range []string{"agents", "api_keys", "projects", "tasks", "task_edges", "chat_messages", "token_usage", "memories", "roles", "agent_roles"} {
+	for _, table := range []string{"agents", "api_keys", "projects", "tasks", "task_edges", "chat_messages", "token_usage", "memories", "roles", "agent_roles", "skills", "role_skills", "agent_skills"} {
 		var count int
 		err := db.Conn.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
 		if err != nil {

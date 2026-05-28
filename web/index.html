@@ -32,6 +32,9 @@
       <button class="nav-btn" data-page="agents">
         <span class="nav-icon">&#9673;</span> Agents
       </button>
+      <button class="nav-btn" data-page="skills">
+        <span class="nav-icon">&#9881;</span> Skills
+      </button>
       <button class="nav-btn" data-page="projects">
         <span class="nav-icon">&#9674;</span> Projects
       </button>
@@ -159,10 +162,63 @@
         </div>
       </div>
       <table class="table">
-        <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Role</th><th>Endpoint</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Role</th><th>Endpoint</th><th>Status</th><th>Last Seen</th><th>Recoveries</th><th>Actions</th></tr></thead>
         <tbody id="agents-body"></tbody>
       </table>
       <div id="agents-empty" class="empty" style="display:none">No agents configured yet.</div>
+    </section>
+
+    <!-- Skills -->
+    <section id="page-skills" class="page-section">
+      <h1 class="section-title">Skills Library</h1>
+      <p class="section-sub">Reusable team capabilities shared across roles and agents</p>
+      <div class="form">
+        <div class="form-title">Create New Skill</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" id="sk-name" placeholder="e.g., Go REST API Generator">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select class="form-input" id="sk-category">
+              <option value="Planning">Planning</option>
+              <option value="Architecture">Architecture</option>
+              <option value="Go Backend">Go Backend</option>
+              <option value="Frontend UI">Frontend UI</option>
+              <option value="Code Review">Code Review</option>
+              <option value="Testing">Testing</option>
+              <option value="Git">Git</option>
+              <option value="DevOps">DevOps</option>
+              <option value="Documentation">Documentation</option>
+              <option value="Security">Security</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Description</label>
+            <input class="form-input" id="sk-desc" placeholder="What this skill does...">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Prompt Content</label>
+            <textarea class="form-input" id="sk-content" rows="4" placeholder="The skill prompt/instructions..."></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" onclick="addSkill()">Create Skill</button>
+          </div>
+        </div>
+      </div>
+      <div id="skills-stats" class="stats-grid" style="margin-bottom:16px"></div>
+      <table class="table">
+        <thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Description</th><th>Uses</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="skills-body"></tbody>
+      </table>
+      <div id="skills-empty" class="empty" style="display:none">No skills created yet.</div>
     </section>
 
     <!-- Projects -->
